@@ -1,0 +1,36 @@
+name: PR AI Security Review
+
+on:
+  workflow_call:
+    secrets:
+      DEEPSEEK_API_KEY:
+        description: DeepSeek API Key，必须由调用项目显式传入。
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: pr-ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-security-gate:
+    name: pr-security-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出中心审查规则
+        uses: actions/checkout@v4
+        with:
+          repository: li2233-max/pr-security-gate
+          ref: v1
+          path: .pr-security-gate
+          persist-credentials: false
+      - name: 生成 AI 安全审查报告
+        run: node .pr-security-gate/.github/scripts/pr-ai-review.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}

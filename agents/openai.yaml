@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR 安全审查门禁"
+  short_description: "基于 PR diff 的安全门禁与 Code Review 固定报告"
+  default_prompt: "使用 $pr-security-gate 审查此 PR diff，并输出带仓库、提交和技术债信息的 Code Review 报告。"
