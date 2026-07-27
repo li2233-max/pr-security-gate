@@ -41,3 +41,13 @@ test('新项目接入说明提供中心工作流、Secret、验证和分支保�
   assert.match(guide, /Branch protection rules/);
   assert.match(guide, /不复制审查脚本或规则文件/);
 });
+
+test('README 说明中心仓库用途与 v2 接入方式', async () => {
+  const readme = await readFile(new URL('./README.md', import.meta.url), 'utf8');
+
+  assert.match(readme, /PR 安全审查门禁/);
+  assert.match(readme, /li2233-max\/pr-security-gate\/\.github\/workflows\/pr-ai-review\.yml@v2/);
+  assert.match(readme, /DEEPSEEK_API_KEY/);
+  assert.match(readme, /Branch protection rules/);
+  assert.match(readme, /new-project-integration\.md/);
+});
