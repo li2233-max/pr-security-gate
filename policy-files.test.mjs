@@ -26,3 +26,18 @@ test('证据规则按敏感面分流，CI 改动不套用接口鉴权证据', as
   assert.match(evidence, /标准 `pull_request` 入口本身不构成风险项/);
   assert.match(output, /必须指明缺失证据对应的敏感面/);
 });
+
+test('新项目接入说明提供中心工作流、Secret、验证和分支保护步骤', async () => {
+  const [skill, guide] = await Promise.all([
+    readFile(new URL('./SKILL.md', import.meta.url), 'utf8'),
+    readFile(new URL('./references/new-project-integration.md', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(skill, /references\/new-project-integration\.md/);
+  assert.match(guide, /\.github\/workflows\/pr-ai-review\.yml/);
+  assert.match(guide, /li2233-max\/pr-security-gate\/\.github\/workflows\/pr-ai-review\.yml@v2/);
+  assert.match(guide, /DEEPSEEK_API_KEY/);
+  assert.match(guide, /pull_request/);
+  assert.match(guide, /Branch protection rules/);
+  assert.match(guide, /不复制审查脚本或规则文件/);
+});

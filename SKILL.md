@@ -5,6 +5,10 @@ description: 用于审查 PR diff 的安全风险与合并条件，适用于认�
 
 # PR 安全审查门禁
 
+## 新项目接入
+
+需要把本中心审查接入新的 GitHub 项目时，先读取 [references/new-project-integration.md](references/new-project-integration.md)。
+
 ## 核心原则
 
 基于实际 PR diff 和可复验证据输出可追溯的 Code Review 报告。AI 推断、作者声明和未运行的检查不是证据。P0 或涉及的敏感面无法用对应证据证明安全时必须 `BLOCK`；只有 P1/P2 时可 `PASS`，技术债仅记录数量，不阻止合并。
