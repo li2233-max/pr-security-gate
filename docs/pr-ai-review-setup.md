@@ -22,7 +22,7 @@ permissions:
 jobs:
   security-review:
     name: pr-security-gate
-    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v1
+    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v2
     secrets:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
 ```
@@ -47,10 +47,10 @@ DEEPSEEK_API_KEY
 
 先让该检查成功运行一次，再进入 `Settings → Branches → Branch protection rules`，为 `dev` 和 `main` 开启 **Require status checks to pass before merging**，并选择页面实际显示的 `pr-security-gate` 检查。此后 `BLOCK`、模型调用失败或报告格式无效都会阻止合并；仅有 P1/P2 时检查通过，报告只显示 `技术债：N 项`。
 
-## 5. `pull_request` 的使用边界
+## 5. `pull_request` 标准入口
 
-当前模板按你的选择使用 `pull_request`，这样向 `dev` 的首次 PR 也会立即执行。风险是：拥有同仓库分支写入权的成员可在 PR 中修改入口工作流，尝试把 `DEEPSEEK_API_KEY` 发送到外部。因此只应向受信任的同仓库贡献者开放写入权；来自 fork 的 PR 不会获得该 Secret，仍应人工复核。
+当前模板固定使用 `pull_request`，因此向 `dev` 或 `main` 的首次 PR 也会立即执行。中心规则将它视为标准入口：仅使用该触发器不会产生 P0/P1/P2 风险项或技术债。中心工作流只读取 PR diff 和中心规则，不检出、安装或执行 PR 分支代码。
 
 ## 6. 更新中心规则
 
-中心仓库修复或增强后，测试通过并发布新版本标签，例如 `v2`。项目把 `@v1` 改为 `@v2` 即可升级；保持 `@v1` 则继续使用当前稳定版本。
+中心仓库修复或增强后，测试通过并发布新版本标签，例如 `v3`。项目把 `@v2` 改为 `@v3` 即可升级；保持 `@v2` 则继续使用当前稳定版本。

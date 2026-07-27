@@ -21,6 +21,8 @@ test('证据规则按敏感面分流，CI 改动不套用接口鉴权证据', as
   ]);
 
   assert.match(skill, /仅 CI、配置或依赖改动/);
+  assert.match(skill, /中心模板中的 `pull_request` 入口本身不作为 P0\/P1\/P2 风险或技术债/);
   assert.match(evidence, /不得因仅 CI、配置或依赖改动而要求 401\/403/);
+  assert.match(evidence, /标准 `pull_request` 入口本身不构成风险项/);
   assert.match(output, /必须指明缺失证据对应的敏感面/);
 });

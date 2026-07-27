@@ -205,7 +205,7 @@ function buildPrompt({ policy, diff, context }) {
     '仅根据所给 diff 和证据做判断；无法验证时明确写“未提供”。',
     '只输出 JSON，不要使用 Markdown 代码块。',
     'JSON 必须包含：conclusion(PASS 或 BLOCK)、summary、positives(string[])、sensitiveSurfaces（接口、认证、鉴权、权限、数据、文件、配置、依赖、CI；每项有 status=涉及/未涉及/无法判断 和 reason）、evidence(string[])、risks（每项有 level=P0/P1/P2、title、location、type、basis、path、impact、recommendation）和 technicalDebtCount（P1/P2 的数量）。',
-    'P0 必须 BLOCK；仅 P1/P2 才能 PASS。证据要求必须与“变更的敏感面”匹配：接口、认证、鉴权、权限或数据涉及/无法判断时，必须提供 401/403、角色、资源归属或失效 Token 等访问控制证据；仅配置、依赖或 CI 涉及时，不得要求上述接口鉴权证据。CI/配置应改为核对工作流 diff、权限、Secret 暴露、是否执行 PR 代码和扫描结果；只有发现具体风险时才列 P0/P1/P2。',
+    'P0 必须 BLOCK；仅 P1/P2 才能 PASS。证据要求必须与“变更的敏感面”匹配：接口、认证、鉴权、权限或数据涉及/无法判断时，必须提供 401/403、角色、资源归属或失效 Token 等访问控制证据；仅配置、依赖或 CI 涉及时，不得要求上述接口鉴权证据。中心模板中的 pull_request 入口本身不得作为 P0/P1/P2 风险或技术债。CI/配置应改为核对工作流 diff、权限、Secret 暴露、是否执行 PR 代码和扫描结果；只有发现具体的 Secret 外传、恶意外部调用、执行 PR 代码或绕过门禁行为时才列 P0/P1/P2。',
     '',
     `审查元数据：${JSON.stringify({ repository: context.repository, branch: context.branch, commit: context.commit })}`,
     '',
