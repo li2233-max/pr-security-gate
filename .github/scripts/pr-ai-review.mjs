@@ -205,7 +205,7 @@ function buildPrompt({ policy, diff, context }) {
     '仅根据所给 diff 和证据做判断；无法验证时明确写“未提供”。',
     '只输出 JSON，不要使用 Markdown 代码块。',
     'JSON 必须包含：conclusion(PASS 或 BLOCK)、summary、positives(string[])、sensitiveSurfaces（接口、认证、鉴权、权限、数据、文件、配置、依赖、CI；每项有 status=涉及/未涉及/无法判断 和 reason）、evidence(string[])、risks（每项有 level=P0/P1/P2、title、location、type、basis、path、impact、recommendation）和 technicalDebtCount（P1/P2 的数量）。',
-    'P0 必须 BLOCK；仅 P1/P2 才能 PASS。证据要求必须与“变更的敏感面”匹配：接口、认证、鉴权、权限或数据涉及/无法判断时，必须提供 401/403、角色、资源归属或失效 Token 等访问控制证据；仅配置、依赖或 CI 涉及时，不得要求上述接口鉴权证据。中心模板中的 pull_request 入口本身不得作为 P0/P1/P2 风险或技术债。CI/配置应改为核对工作流 diff、权限、Secret 暴露、是否执行 PR 代码和扫描结果；只有发现具体的 Secret 外传、恶意外部调用、执行 PR 代码或绕过门禁行为时才列 P0/P1/P2。',
+    'P0 必须 BLOCK；仅 P1/P2 才能 PASS。每个风险必须同时按影响范围、可利用性、暴露范围和可达性定级；CVSS 标签不是最终结论。扫描告警时，在依据中写出已提供的 CVSS、EPSS、已知被利用（KEV）和运行时可达性，未知则写“未提供”。已知被利用、生产运行时可达且影响账户、权限、租户、支付或敏感数据的漏洞升级为 P0；仅开发依赖或代码不可达且有证据的问题可列为 P1/P2。P2 不得用于密钥泄露、访问控制绕过、跨用户/租户越权、RCE、支付或核心数据风险。证据要求必须与“变更的敏感面”匹配：接口、认证、鉴权、权限或数据涉及/无法判断时，必须提供 401/403、角色、资源归属或失效 Token 等访问控制证据；仅配置、依赖或 CI 涉及时，不得要求上述接口鉴权证据。中心模板中的 pull_request 入口本身不得作为 P0/P1/P2 风险或技术债。CI/配置应改为核对工作流 diff、权限、Secret 暴露、是否执行 PR 代码和扫描结果；只有发现具体的 Secret 外传、恶意外部调用、执行 PR 代码或绕过门禁行为时才列 P0/P1/P2。',
     '',
     `审查元数据：${JSON.stringify({ repository: context.repository, branch: context.branch, commit: context.commit })}`,
     '',

@@ -32,7 +32,7 @@ concurrency:
 jobs:
   security-review:
     name: pr-security-gate
-    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v2
+    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v3
     secrets:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
 ```
@@ -65,4 +65,4 @@ DEEPSEEK_API_KEY
 
 ## 版本升级
 
-新项目默认引用 `@v2`。中心仓库发布新版本后，按用户授权将入口中的版本改为新标签，例如从 `@v2` 改为 `@v3`；不要修改已发布的旧标签。
+新项目默认引用 `@v3`。中心仓库发布新版本后，按用户授权将入口中的版本改为新标签，例如从 `@v3` 改为 `@v4`；不要修改已发布的旧标签。

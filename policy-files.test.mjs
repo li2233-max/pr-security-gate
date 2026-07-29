@@ -35,19 +35,33 @@ test('新项目接入说明提供中心工作流、Secret、验证和分支保�
 
   assert.match(skill, /references\/new-project-integration\.md/);
   assert.match(guide, /\.github\/workflows\/pr-ai-review\.yml/);
-  assert.match(guide, /li2233-max\/pr-security-gate\/\.github\/workflows\/pr-ai-review\.yml@v2/);
+  assert.match(guide, /li2233-max\/pr-security-gate\/\.github\/workflows\/pr-ai-review\.yml@v3/);
   assert.match(guide, /DEEPSEEK_API_KEY/);
   assert.match(guide, /pull_request/);
   assert.match(guide, /Branch protection rules/);
   assert.match(guide, /不复制审查脚本或规则文件/);
 });
 
-test('README 说明中心仓库用途与 v2 接入方式', async () => {
+test('README 说明中心仓库用途与 v3 接入方式', async () => {
   const readme = await readFile(new URL('./README.md', import.meta.url), 'utf8');
 
   assert.match(readme, /PR 安全审查门禁/);
-  assert.match(readme, /li2233-max\/pr-security-gate\/\.github\/workflows\/pr-ai-review\.yml@v2/);
+  assert.match(readme, /li2233-max\/pr-security-gate\/\.github\/workflows\/pr-ai-review\.yml@v3/);
   assert.match(readme, /DEEPSEEK_API_KEY/);
   assert.match(readme, /Branch protection rules/);
   assert.match(readme, /new-project-integration\.md/);
+});
+
+test('风险分级同时考虑影响、可利用性、暴露范围与依赖可达性', async () => {
+  const [skill, evidence] = await Promise.all([
+    readFile(new URL('./SKILL.md', import.meta.url), 'utf8'),
+    readFile(new URL('./references/evidence-requirements.md', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(skill, /影响范围、可利用性、暴露范围和可达性/);
+  assert.match(skill, /CVSS.*不是最终结论/);
+  assert.match(skill, /P2 不得用于密钥泄露、访问控制绕过、跨用户\/租户越权、RCE、支付或核心数据风险/);
+  assert.match(evidence, /CVSS、EPSS、KEV 和运行时可达性/);
+  assert.match(evidence, /已知被利用/);
+  assert.match(evidence, /仅开发依赖或代码不可达/);
 });

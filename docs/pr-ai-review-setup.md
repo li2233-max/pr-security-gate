@@ -22,7 +22,7 @@ permissions:
 jobs:
   security-review:
     name: pr-security-gate
-    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v2
+    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v3
     secrets:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
 ```
@@ -53,4 +53,4 @@ DEEPSEEK_API_KEY
 
 ## 6. 更新中心规则
 
-中心仓库修复或增强后，测试通过并发布新版本标签，例如 `v3`。项目把 `@v2` 改为 `@v3` 即可升级；保持 `@v2` 则继续使用当前稳定版本。
+中心仓库修复或增强后，测试通过并发布新版本标签，例如 `v4`。项目把 `@v3` 改为 `@v4` 即可升级；保持 `@v3` 则继续使用当前稳定版本。

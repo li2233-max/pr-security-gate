@@ -26,7 +26,7 @@ permissions:
 jobs:
   security-review:
     name: pr-security-gate
-    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v2
+    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v3
     secrets:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
 ```
@@ -47,4 +47,4 @@ jobs:
 
 ## 版本
 
-新项目使用 `@v2`。中心仓库发布新版本后，再按需将入口工作流升级到新的标签。
+新项目使用 `@v3`。中心仓库发布新版本后，再按需将入口工作流升级到新的标签。

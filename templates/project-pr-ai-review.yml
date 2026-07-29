@@ -17,6 +17,6 @@ concurrency:
 jobs:
   security-review:
     name: pr-security-gate
-    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v2
+    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v3
     secrets:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}

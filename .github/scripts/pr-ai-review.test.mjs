@@ -109,6 +109,9 @@ test('标准 pull_request CI 入口不会被列为风险项', async () => {
 
   assert.equal(result.conclusion, 'PASS');
   assert.match(prompt, /中心模板中的 pull_request 入口本身不得作为 P0\/P1\/P2 风险或技术债/);
+  assert.match(prompt, /影响范围、可利用性、暴露范围和可达性/);
+  assert.match(prompt, /CVSS 标签不是最终结论/);
+  assert.match(prompt, /已知被利用（KEV）/);
 });
 
 test('存在明确 Secret 外传时仍作为 CI 专属 P0，且不追加无关的接口鉴权证据风险', async () => {
@@ -273,7 +276,7 @@ test('可复用工作流只读取中心仓库的固定规则，且不执行项�
   assert.match(yaml, /workflow_call:/);
   assert.match(yaml, /DEEPSEEK_API_KEY:/);
   assert.match(yaml, /repository: li2233-max\/pr-security-gate/);
-  assert.match(yaml, /ref: v2/);
+  assert.match(yaml, /ref: v3/);
   assert.match(yaml, /persist-credentials: false/);
   assert.doesNotMatch(yaml, /github\.event\.pull_request\.head/);
   assert.doesNotMatch(yaml, /npm (ci|install)|pnpm install|yarn install/);
@@ -284,7 +287,7 @@ test('接入文档将 pull_request 作为标准入口，并包含 Secret、中�
 
   assert.match(setup, /DEEPSEEK_API_KEY/);
   assert.match(setup, /li2233-max\/pr-security-gate/);
-  assert.match(setup, /@v2/);
+  assert.match(setup, /@v3/);
   assert.match(setup, /Branch protection rules/);
   assert.match(setup, /pull_request/);
   assert.match(setup, /标准入口/);
