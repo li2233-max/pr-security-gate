@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "contractChangeCheck": "architecture-owner-approval",
+  "components": [
+    {
+      "name": "api",
+      "paths": ["src/api/**"],
+      "referenceMarkers": ["@app/api/"],
+      "allowedDependencies": ["domain", "shared"]
+    },
+    {
+      "name": "domain",
+      "paths": ["src/domain/**"],
+      "referenceMarkers": ["@app/domain/"],
+      "allowedDependencies": ["shared"]
+    },
+    {
+      "name": "adapters",
+      "paths": ["src/adapters/**"],
+      "referenceMarkers": ["@app/adapters/"],
+      "allowedDependencies": ["domain", "shared"]
+    },
+    {
+      "name": "shared",
+      "paths": ["src/shared/**"],
+      "referenceMarkers": ["@app/shared/"],
+      "allowedDependencies": []
+    }
+  ],
+  "resourceRules": [
+    {
+      "id": "secret-adapter-only",
+      "referenceMarkers": ["process.env.", "Deno.env.", "os.Getenv("],
+      "allowedComponents": ["adapters"]
+    }
+  ],
+  "combinationRules": [
+    {
+      "id": "secret-to-external-output",
+      "sourceMarkers": ["process.env.", "Deno.env.", "os.Getenv("],
+      "sinkMarkers": ["fetch(", "axios.", "http.request(", "webhook"],
+      "scope": "repository",
+      "components": ["api", "domain", "adapters", "shared"]
+    }
+  ],
+  "criticalPaths": [
+    {
+      "id": "authentication",
+      "paths": ["src/api/auth/**", "src/domain/auth/**"],
+      "requiredChecks": ["security-auth-tests"]
+    },
+    {
+      "id": "tenant-ownership",
+      "paths": ["src/api/tenant/**", "src/domain/tenant/**"],
+      "requiredChecks": ["tenant-isolation-tests"]
+    },
+    {
+      "id": "core-write-integrity",
+      "paths": ["src/domain/**/commands/**", "src/domain/**/write/**", "src/adapters/database/**", "migrations/**"],
+      "requiredChecks": ["transaction-idempotency-tests"]
+    },
+    {
+      "id": "deployment-exposure",
+      "paths": ["infra/**", "deploy/**", "Dockerfile", "docker-compose*.yml", ".github/workflows/deploy*.yml"],
+      "requiredChecks": ["deployment-boundary-check"]
+    },
+    {
+      "id": "architecture-policy",
+      "paths": [".pr-security-gate/architecture.json", ".pr-security-gate/debt.json"],
+      "requiredChecks": ["architecture-owner-approval"]
+    }
+  ],
+  "debtBudgets": {
+    "mode": "ratchet",
+    "total": 20,
+    "maxAgeDays": 90,
+    "components": {
+      "api": 5,
+      "domain": 5,
+      "adapters": 5,
+      "shared": 5
+    }
+  }
+}

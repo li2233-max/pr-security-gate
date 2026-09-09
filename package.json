@@ -1,0 +1,9 @@
+{
+  "name": "pr-security-gate",
+  "private": true,
+  "version": "4.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test .github/scripts/architecture-gate.test.mjs .github/scripts/pr-ai-review.test.mjs tests/reusable-workflow.test.mjs policy-files.test.mjs"
+  }
+}

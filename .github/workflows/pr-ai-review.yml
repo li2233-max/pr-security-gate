@@ -8,12 +8,15 @@ on:
         required: true
 
 permissions:
+  actions: read
   contents: read
   pull-requests: write
-  checks: write
+  checks: read
+  security-events: read
+  statuses: read
 
 concurrency:
-  group: pr-ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+  group: pr-ai-review-${{ github.repository }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -25,11 +28,11 @@ jobs:
       - name: 检出中心审查规则
         uses: actions/checkout@v4
         with:
-          repository: li2233-max/pr-security-gate
-          ref: v3
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: .pr-security-gate
           persist-credentials: false
-      - name: 生成 AI 安全审查报告
+      - name: 生成安全与架构审查报告
         run: node .pr-security-gate/.github/scripts/pr-ai-review.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}

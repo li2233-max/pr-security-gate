@@ -14,8 +14,12 @@ test('中心工作流可被项目仓库调用，并声明审查所需 Secret', a
   assert.match(yaml, /workflow_call:/);
   assert.match(yaml, /DEEPSEEK_API_KEY:/);
   assert.match(yaml, /required:\s*true/);
-  assert.match(yaml, /repository:\s*li2233-max\/pr-security-gate/);
-  assert.match(yaml, /ref:\s*v3/);
+  assert.match(yaml, /actions:\s*read/);
+  assert.match(yaml, /checks:\s*read/);
+  assert.match(yaml, /security-events:\s*read/);
+  assert.match(yaml, /statuses:\s*read/);
+  assert.match(yaml, /repository:\s*\$\{\{ job\.workflow_repository \}\}/);
+  assert.match(yaml, /ref:\s*\$\{\{ job\.workflow_sha \}\}/);
   assert.match(yaml, /node \.pr-security-gate\/.github\/scripts\/pr-ai-review\.mjs/);
   assert.doesNotMatch(yaml, /github\.event\.pull_request\.head/);
   assert.doesNotMatch(yaml, /npm (ci|install)|pnpm install|yarn install/);
@@ -27,7 +31,13 @@ test('项目入口模板只调用中心工作流并显式传递 API Key', async 
 
   const yaml = await readFile(callerTemplatePath, 'utf8');
   assert.match(yaml, /pull_request:/);
-  assert.match(yaml, /uses:\s*li2233-max\/pr-security-gate\/\.github\/workflows\/pr-ai-review\.yml@v3/);
+  assert.match(yaml, /merge_group:/);
+  assert.match(yaml, /checks_requested/);
+  assert.match(yaml, /actions:\s*read/);
+  assert.match(yaml, /checks:\s*read/);
+  assert.match(yaml, /security-events:\s*read/);
+  assert.match(yaml, /statuses:\s*read/);
+  assert.match(yaml, /uses:\s*li2233-max\/pr-security-gate\/\.github\/workflows\/pr-ai-review\.yml@v4/);
   assert.match(yaml, /DEEPSEEK_API_KEY:\s*\$\{\{ secrets\.DEEPSEEK_API_KEY \}\}/);
   assert.doesNotMatch(yaml, /steps:/);
   assert.doesNotMatch(yaml, /run:/);

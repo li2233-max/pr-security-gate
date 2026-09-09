@@ -1,56 +1,49 @@
-# 项目接入 PR AI 安全审查
+# 项目接入 PR 安全与架构门禁
 
-`li2233-max/pr-security-gate` 是中心规则仓库：它保存审查规则、固定输出模板、审查脚本和可复用 GitHub Actions 工作流。项目仓库不复制这些文件，只保留一个入口工作流。
+`li2233-max/pr-security-gate` 是中心规则仓库。目标项目只保留标准入口，以及属于该项目的 `.pr-security-gate/architecture.json` 和 `.pr-security-gate/debt.json`。
 
-## 1. 添加项目入口
+## 标准入口
 
-在目标项目新建 `.github/workflows/pr-ai-review.yml`，内容与 [模板](../templates/project-pr-ai-review.yml) 相同：
-
-```yaml
-name: PR AI Security Review
-
-on:
-  pull_request:
-    branches: [dev, main]
-    types: [opened, synchronize, reopened]
-
-permissions:
-  contents: read
-  pull-requests: write
-  checks: write
-
-jobs:
-  security-review:
-    name: pr-security-gate
-    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v3
-    secrets:
-      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-```
-
-项目入口只负责触发和传递本项目的 Secret；它不检出、安装或执行 PR 分支代码。
-
-## 2. 配置 API Key
-
-在每个接入项目中进入 `Settings → Secrets and variables → Actions → Secrets`，新建 repository secret：
+把 [项目入口模板](../templates/project-pr-ai-review.yml) 复制为目标项目的 `.github/workflows/pr-ai-review.yml`。它引用：
 
 ```text
-DEEPSEEK_API_KEY
+li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v4
 ```
 
-不要将 Key 写入 YAML、代码、PR、Issue 或日志。这里使用显式映射而不是 `secrets: inherit`，因此中心工作流只能收到这一项 Secret。
+入口同时监听 `pull_request` 与 `merge_group` 的 `checks_requested`，后者用于 GitHub Merge Queue。目标项目必须显式映射 `DEEPSEEK_API_KEY`，不要使用 `secrets: inherit`。
 
-## 3. 验证
+入口的 `permissions` 是证据采集契约的一部分：
 
-以 `dev` 或 `main` 为 base 创建一个内部 PR。检查中应出现 `pr-security-gate`，PR Conversation 中应出现以 `Code Review 完成` 开头的固定报告。推送新的 commit 会更新同一条报告。
+- `contents: read`：读取固定 SHA 的 diff、契约和候选源码切片。
+- `checks: read`、`statuses: read`：读取当前候选 SHA 的 Check Runs 和 legacy commit statuses。
+- `actions: read`：核验 GitHub Actions Check 所属 workflow run 及其 workflow 来源。
+- `security-events: read`：读取 Code Scanning analysis 与开放 alert 的元数据。
+- `pull-requests: write`：读取 PR 状态并发布或更新审查评论。
 
-## 4. 分支保护
+GitHub 对可复用工作流采用权限收窄规则：被调用工作流不能把调用方未授予的权限提升回来。因此，必须在目标仓库入口保留模板中的权限；只修改中心 workflow 不足以让证据 API 可用。
 
-先让该检查成功运行一次，再进入 `Settings → Branches → Branch protection rules`，为 `dev` 和 `main` 开启 **Require status checks to pass before merging**，并选择页面实际显示的 `pr-security-gate` 检查。此后 `BLOCK`、模型调用失败或报告格式无效都会阻止合并；仅有 P1/P2 时检查通过，报告只显示 `技术债：N 项`。
+## 证据采集边界
 
-## 5. `pull_request` 标准入口
+门禁读取 PR 正文、Check Runs、commit statuses 和 Code Scanning 元数据，并把证据绑定到当前 candidate SHA。PR 正文中的测试名、结果和链接仅是作者声明；即使正文写着“PASS”或“401/403 已验证”，也不能单独满足必需证据。GitHub Actions Check 还要绑定 Check Suite 与成功的 workflow run，并证明顶层 workflow 在 base 与候选间未改变；legacy status 不参与机器通过判定或架构审批。
 
-当前模板固定使用 `pull_request`，因此向 `dev` 或 `main` 的首次 PR 也会立即执行。中心规则将它视为标准入口：仅使用该触发器不会产生 P0/P1/P2 风险项或技术债。中心工作流只读取 PR diff 和中心规则，不检出、安装或执行 PR 分支代码。
+已发现的 pending Check 或尚未生成当前 SHA analysis 的 Code Scanning 会有界等待并重采集，默认上限 180 秒；超时、API 返回 403/404 或证据无法绑定候选 SHA 时，状态记为 `unavailable`/缺失，不会当作通过。Code Scanning 还必须使用中心策略允许的工具、达到最低规则数，并且 PR 未修改扫描控制路径；这些元数据校验仍不能证明扫描配置覆盖充分，高风险改动应使用受保护的扫描资产或人工复核。门禁不下载完整 Actions 日志、原始 SARIF 或 artifact，也不抓取 PR/Check 链接指向的外部内容；请勿在 PR 正文中粘贴 Secret、Token、Cookie、Authorization header 或完整 HTTP 请求/响应。
 
-## 6. 更新中心规则
+## 项目架构契约
 
-中心仓库修复或增强后，测试通过并发布新版本标签，例如 `v4`。项目把 `@v3` 改为 `@v4` 即可升级；保持 `@v3` 则继续使用当前稳定版本。
+先按项目实际情况定制并合入 base：
+
+- [架构模板](../templates/architecture.json) → `.pr-security-gate/architecture.json`
+- [债务模板](../templates/debt.json) → `.pr-security-gate/debt.json`
+
+不要原样保留模板中的占位检查名。契约修改使用 base 版本规则评估，并要求真实存在的负责人检查；债务账本应从当前真实基线开始，不能把历史问题清零。
+
+v4 不提供“未配置兼容放行”：受保护 base 缺少任一基线文件都会 `BLOCK`。因此必须先通过旧门禁或人工审批把契约与债务基线合入 base，再把项目入口升级到 `@v4`。
+
+## GitHub 设置
+
+1. 在 `Settings → Secrets and variables → Actions → Secrets` 新建 `DEEPSEEK_API_KEY`。
+2. 先运行一次门禁，再到 `Settings → Branches → Branch protection rules` 或 Rulesets，把 `pr-security-gate` 设为 required check。
+3. 启用 Merge Queue；无法启用时，至少要求分支合并前基于最新 base。
+4. 用 CODEOWNERS 和独立审批检查保护契约、账本及入口工作流。
+
+`BLOCK`、模型失败、输出无效、架构规则违规、债务策略违规、必需检查缺失或 SHA 漂移都会使门禁失败。完整步骤、验收用例和 `@v3` → `@v4` 顺序见 [新项目接入说明](../references/new-project-integration.md)。
