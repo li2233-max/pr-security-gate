@@ -862,6 +862,45 @@ test('模型调用失败会产生 BLOCK 而不是 PASS', async () => {
   assert.doesNotMatch(comment, /未发现 P0、P1 或 P2 问题/);
 });
 
+test('DeepSeek 审查结构校验失败时最多纠正重试一次', async () => {
+  let attempts = 0;
+  const prompts = [];
+  const result = await runReview({
+    getPullRequest: async () => ({ ...baseContext, isFork: false, changedFiles: ['docs/guide.md'] }),
+    getDiff: async () => 'diff --git a/docs/guide.md b/docs/guide.md',
+    readPolicy: async () => '# PR 安全审查门禁',
+    callModel: async request => {
+      attempts += 1;
+      prompts.push(request.prompt);
+      return attempts === 1 ? review({ sensitiveSurfaces: [] }) : review();
+    },
+    getArchitectureInputs: async () => passingArchitectureInputs(),
+    upsertComment: async () => {},
+  });
+
+  assert.equal(attempts, 2);
+  assert.match(prompts[1], /上一次输出未通过结构校验/);
+  assert.equal(result.securityConclusion, 'PASS');
+  assert.equal(result.conclusion, 'PASS');
+
+  let invalidAttempts = 0;
+  const stillInvalid = await runReview({
+    getPullRequest: async () => ({ ...baseContext, isFork: false, changedFiles: ['docs/guide.md'] }),
+    getDiff: async () => 'diff --git a/docs/guide.md b/docs/guide.md',
+    readPolicy: async () => '# PR 安全审查门禁',
+    callModel: async () => {
+      invalidAttempts += 1;
+      return review({ sensitiveSurfaces: [] });
+    },
+    getArchitectureInputs: async () => passingArchitectureInputs(),
+    upsertComment: async () => {},
+  });
+
+  assert.equal(invalidAttempts, 2);
+  assert.equal(stillInvalid.conclusion, 'BLOCK');
+  assert.match(stillInvalid.diagnostic, /sensitiveSurfaces 必须是对象/);
+});
+
 test('DeepSeek 截断 JSON 时报告 finish_reason，而不是泛化成 JSON 解析错误', async () => {
   const dependencies = createWorkflowDependencies({
     event: {

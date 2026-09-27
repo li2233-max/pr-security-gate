@@ -574,15 +574,26 @@ export async function runReview(dependencies) {
           throw new ReviewGateError(`结构化证据超过 ${MAX_EVIDENCE_ITEMS} 项，需缩小检查范围或人工复核`);
         }
         const policy = await dependencies.readPolicy();
-        const raw = await dependencies.callModel({
-          model: 'deepseek-v4-pro',
-          prompt: buildPrompt({ policy, diff: redact(diff), context, evidenceCatalog }),
-        });
-        review = validateReview(raw, {
-          candidateSha,
-          collectedEvidence: evidenceCatalog,
-          changedFiles: context.changedFiles,
-        });
+        const prompt = buildPrompt({ policy, diff: redact(diff), context, evidenceCatalog });
+        let raw = await dependencies.callModel({ model: 'deepseek-v4-pro', prompt });
+        try {
+          review = validateReview(raw, {
+            candidateSha,
+            collectedEvidence: evidenceCatalog,
+            changedFiles: context.changedFiles,
+          });
+        } catch (error) {
+          if (!(error instanceof ReviewGateError)) throw error;
+          raw = await dependencies.callModel({
+            model: 'deepseek-v4-pro',
+            prompt: `${prompt}\n\n上一次输出未通过结构校验（${error.message}）。请重新完成审查，只修正输出格式并满足上方 JSON 对象结构；不要省略字段，不要输出 Markdown。`,
+          });
+          review = validateReview(raw, {
+            candidateSha,
+            collectedEvidence: evidenceCatalog,
+            changedFiles: context.changedFiles,
+          });
+        }
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : '未知错误';
@@ -606,7 +617,16 @@ export async function runReview(dependencies) {
 
   const markdown = renderReport(context, review, architecture);
   await dependencies.upsertComment(markdown);
-  return { conclusion: finalGateConclusion(review, architecture), securityConclusion: review.conclusion, architecture, markdown };
+  const diagnostics = [];
+  if (review.conclusion === 'BLOCK') diagnostics.push(`安全门禁 BLOCK：${redact(review.summary)}`);
+  if (architecture.conclusion === 'BLOCK') diagnostics.push(`架构门禁 BLOCK：${redact(architecture.summary)}`);
+  return {
+    conclusion: finalGateConclusion(review, architecture),
+    securityConclusion: review.conclusion,
+    architecture,
+    diagnostic: diagnostics.join('；').slice(0, 800),
+    markdown,
+  };
 }
 
 async function responseText(response, label) {
@@ -1428,6 +1448,7 @@ export async function main({ env = process.env, fetchImpl = globalThis.fetch, re
   const event = JSON.parse(await readFileImpl(env.GITHUB_EVENT_PATH, 'utf8'));
   const result = await runReview(createWorkflowDependencies({ event, env, fetchImpl, readFileImpl }));
   if (result.conclusion === 'BLOCK') {
+    console.error(`pr-security-gate 判定 BLOCK：${result.diagnostic || '请查看 PR 的 Code Review 完成报告'}。`);
     process.exitCode = 1;
   }
   return result;
