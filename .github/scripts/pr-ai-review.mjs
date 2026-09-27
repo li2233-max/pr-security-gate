@@ -955,9 +955,11 @@ export function createWorkflowDependencies({
 
   function usesDefaultPullRequestCheckout(workflowText) {
     const lines = workflowText.split(/\r?\n/);
+    let foundCheckout = false;
     for (let index = 0; index < lines.length; index += 1) {
       const usesMatch = lines[index].match(/^(\s*)-\s+uses:\s*actions\/checkout@[^\s#]+\s*(?:#.*)?$/i);
       if (!usesMatch) continue;
+      foundCheckout = true;
       const stepIndent = usesMatch[1].length;
       for (let next = index + 1; next < lines.length; next += 1) {
         const line = lines[next];
@@ -965,9 +967,8 @@ export function createWorkflowDependencies({
         if (nextStep && nextStep[1].length <= stepIndent) break;
         if (/^\s+ref\s*:/i.test(line)) return false;
       }
-      return true;
     }
-    return false;
+    return foundCheckout;
   }
 
   async function githubActionsCheckUsesUnchangedBaseWorkflow(run, sourceRef, candidateRef, bridgedFromHead) {

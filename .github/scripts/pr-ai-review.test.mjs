@@ -388,7 +388,7 @@ test('工作流从当前 PR、候选 SHA Check Runs 和 Code Scanning 采集证�
 
   const explicitCheckoutRef = await untrustedBridge(async (url, response) => {
     if (!url.includes('/contents/.github/workflows/authorization-tests.yml?ref=')) return response;
-    const workflow = 'name: authorization-tests\non:\n  pull_request:\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          ref: refs/heads/main\n      - run: npm test\n';
+    const workflow = 'name: authorization-tests\non:\n  pull_request:\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/checkout@v4\n        with:\n          ref: refs/heads/main\n      - run: npm test\n';
     return new Response(JSON.stringify({
       type: 'file',
       encoding: 'base64',
