@@ -825,6 +825,13 @@ test('DeepSeek 的 PASS JSON 生成可更新的报告', async () => {
       assert.match(request.prompt, /PR 安全审查门禁/);
       assert.match(request.prompt, /docs\/guide\.md/);
       assert.match(request.prompt, /sensitiveSurfaces 是对象而不是数组/);
+      const surfaceExample = request.prompt.match(/对象结构示例：(\{[^\n]+\})/);
+      assert.ok(surfaceExample, '提示词应提供机器可解析的 sensitiveSurfaces 对象示例');
+      const parsedSurfaceExample = JSON.parse(surfaceExample[1]);
+      assert.deepEqual(Object.keys(parsedSurfaceExample), Object.keys(review().sensitiveSurfaces));
+      assert.ok(Object.values(parsedSurfaceExample).every(item => (
+        typeof item.status === 'string' && typeof item.reason === 'string'
+      )));
       return review();
     },
     getArchitectureInputs: async () => passingArchitectureInputs(),
