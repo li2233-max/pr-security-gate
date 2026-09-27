@@ -221,7 +221,7 @@ test('工作流从当前 PR、候选 SHA Check Runs 和 Code Scanning 采集证�
       user: { login: 'author' },
     },
   };
-  let checkRunReads = 0;
+  let headCheckRunReads = 0;
   let scanToolName = 'CodeQL';
   const fetchImpl = async url => {
     if (url.endsWith('/pulls/8')) {
@@ -235,15 +235,18 @@ test('工作流从当前 PR、候选 SHA Check Runs 和 Code Scanning 采集证�
       }));
     }
     if (url.includes('/commits/merge1234/check-runs')) {
-      checkRunReads += 1;
-      const completed = checkRunReads >= 2;
+      return new Response(JSON.stringify({ total_count: 0, check_runs: [] }));
+    }
+    if (url.includes('/commits/head1234/check-runs')) {
+      headCheckRunReads += 1;
+      const completed = headCheckRunReads >= 2;
       return new Response(JSON.stringify({
         total_count: 2,
         check_runs: [
           {
             id: 101,
             name: 'authorization-tests',
-            head_sha: 'merge1234',
+            head_sha: 'head1234',
             status: completed ? 'completed' : 'in_progress',
             conclusion: completed ? 'success' : null,
             details_url: 'https://github.com/owner/repo/actions/runs/501/job/101',
@@ -268,29 +271,30 @@ test('工作流从当前 PR、候选 SHA Check Runs 和 Code Scanning 采集证�
       return new Response(JSON.stringify({ total_count: 0, statuses: [] }));
     }
     if (url.endsWith('/actions/runs/501')) {
-      const completed = checkRunReads >= 2;
+      const completed = headCheckRunReads >= 2;
       return new Response(JSON.stringify({
         id: 501,
         check_suite_id: 700,
-        head_sha: 'merge1234',
+        head_sha: 'head1234',
         status: completed ? 'completed' : 'in_progress',
         conclusion: completed ? 'success' : null,
         event: 'pull_request',
         path: '.github/workflows/authorization-tests.yml',
+        pull_requests: [{ number: 8, head: { sha: 'head1234' }, base: { sha: 'base1234' } }],
       }));
     }
     if (url.includes('/contents/.github/workflows/authorization-tests.yml?ref=base1234')) {
       return new Response(JSON.stringify({
         type: 'file',
         encoding: 'base64',
-        content: Buffer.from('name: authorization-tests\n').toString('base64'),
+        content: Buffer.from('name: authorization-tests\non:\n  pull_request:\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n      - run: npm test\n').toString('base64'),
       }));
     }
     if (url.includes('/contents/.github/workflows/authorization-tests.yml?ref=merge1234')) {
       return new Response(JSON.stringify({
         type: 'file',
         encoding: 'base64',
-        content: Buffer.from('name: authorization-tests\n').toString('base64'),
+        content: Buffer.from('name: authorization-tests\non:\n  pull_request:\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n      - run: npm test\n').toString('base64'),
       }));
     }
     if (url.includes('/code-scanning/analyses')) {
@@ -336,7 +340,7 @@ test('工作流从当前 PR、候选 SHA Check Runs 和 Code Scanning 采集证�
   assert.equal(codeScanning.type, 'static_analysis');
   assert.equal(codeScanning.status, 'passed');
   assert.equal(codeScanning.verified, true);
-  assert.equal(checkRunReads, 2);
+  assert.equal(headCheckRunReads, 2);
 
   scanToolName = 'Untrusted Scanner';
   const evidenceFromUntrustedScanner = await dependencies.getEvidence();
@@ -354,6 +358,44 @@ test('工作流从当前 PR、候选 SHA Check Runs 和 Code Scanning 采集证�
   const scanningAfterWorkflowChange = evidenceAfterWorkflowChange.find(item => item.source === 'code_scanning_analysis');
   assert.equal(scanningAfterWorkflowChange.status, 'unavailable');
   assert.equal(scanningAfterWorkflowChange.verified, false);
+
+  context.changedFiles = [];
+  const untrustedBridge = async (mutateResponse) => {
+    headCheckRunReads = 2;
+    const wrappedFetch = async url => {
+      const response = await fetchImpl(url);
+      return mutateResponse(url, response);
+    };
+    const untrustedDependencies = createWorkflowDependencies({
+      event,
+      env: {
+        GITHUB_REPOSITORY: 'owner/repo',
+        GITHUB_TOKEN: 'github-token',
+        EVIDENCE_CHECK_WAIT_MS: '0',
+      },
+      fetchImpl: wrappedFetch,
+    });
+    const untrustedEvidence = await untrustedDependencies.getEvidence();
+    return untrustedEvidence.find(item => item.name === 'authorization-tests');
+  };
+  const mismatchedPr = await untrustedBridge(async (url, response) => {
+    if (!url.endsWith('/actions/runs/501')) return response;
+    const run = await response.json();
+    run.pull_requests = [{ number: 99, head: { sha: 'head1234' }, base: { sha: 'base1234' } }];
+    return new Response(JSON.stringify(run));
+  });
+  assert.equal(mismatchedPr.verified, false);
+
+  const explicitCheckoutRef = await untrustedBridge(async (url, response) => {
+    if (!url.includes('/contents/.github/workflows/authorization-tests.yml?ref=')) return response;
+    const workflow = 'name: authorization-tests\non:\n  pull_request:\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/checkout@v4\n        with:\n          ref: refs/heads/main\n      - run: npm test\n';
+    return new Response(JSON.stringify({
+      type: 'file',
+      encoding: 'base64',
+      content: Buffer.from(workflow).toString('base64'),
+    }));
+  });
+  assert.equal(explicitCheckoutRef.verified, false);
 });
 
 test('PR 自己新增的 GitHub Actions 工作流不能伪造可信授权证据', async () => {
@@ -394,6 +436,9 @@ test('PR 自己新增的 GitHub Actions 工作流不能伪造可信授权证据'
           output: { title: 'Authorization tests', summary: '声称授权测试通过。' },
         }],
       }));
+    }
+    if (url.includes('/commits/head1234/check-runs')) {
+      return new Response(JSON.stringify({ total_count: 0, check_runs: [] }));
     }
     if (url.includes('/commits/merge1234/status')) {
       return new Response(JSON.stringify({ total_count: 0, statuses: [] }));
@@ -472,6 +517,9 @@ test('Check Suite 与 Workflow Run 不匹配时不能借用可信运行结果', 
           output: { title: 'Authorization tests', summary: '借用其他成功 run。' },
         }],
       }));
+    }
+    if (url.includes('/commits/head1234/check-runs')) {
+      return new Response(JSON.stringify({ total_count: 0, check_runs: [] }));
     }
     if (url.includes('/commits/merge1234/status')) {
       return new Response(JSON.stringify({ total_count: 0, statuses: [] }));
@@ -776,6 +824,14 @@ test('DeepSeek 的 PASS JSON 生成可更新的报告', async () => {
     callModel: async request => {
       assert.match(request.prompt, /PR 安全审查门禁/);
       assert.match(request.prompt, /docs\/guide\.md/);
+      assert.match(request.prompt, /sensitiveSurfaces 是对象而不是数组/);
+      const surfaceExample = request.prompt.match(/对象结构示例：(\{[^\n]+\})/);
+      assert.ok(surfaceExample, '提示词应提供机器可解析的 sensitiveSurfaces 对象示例');
+      const parsedSurfaceExample = JSON.parse(surfaceExample[1]);
+      assert.deepEqual(Object.keys(parsedSurfaceExample), Object.keys(review().sensitiveSurfaces));
+      assert.ok(Object.values(parsedSurfaceExample).every(item => (
+        typeof item.status === 'string' && typeof item.reason === 'string'
+      )));
       return review();
     },
     getArchitectureInputs: async () => passingArchitectureInputs(),
@@ -804,6 +860,45 @@ test('模型调用失败会产生 BLOCK 而不是 PASS', async () => {
   assert.match(comment, /无法可靠分类敏感面或推导逐项证据缺口/);
   assert.doesNotMatch(comment, /接口：缺少当前候选 SHA/);
   assert.doesNotMatch(comment, /未发现 P0、P1 或 P2 问题/);
+});
+
+test('DeepSeek 审查结构校验失败时最多纠正重试一次', async () => {
+  let attempts = 0;
+  const prompts = [];
+  const result = await runReview({
+    getPullRequest: async () => ({ ...baseContext, isFork: false, changedFiles: ['docs/guide.md'] }),
+    getDiff: async () => 'diff --git a/docs/guide.md b/docs/guide.md',
+    readPolicy: async () => '# PR 安全审查门禁',
+    callModel: async request => {
+      attempts += 1;
+      prompts.push(request.prompt);
+      return attempts === 1 ? review({ sensitiveSurfaces: [] }) : review();
+    },
+    getArchitectureInputs: async () => passingArchitectureInputs(),
+    upsertComment: async () => {},
+  });
+
+  assert.equal(attempts, 2);
+  assert.match(prompts[1], /上一次输出未通过结构校验/);
+  assert.equal(result.securityConclusion, 'PASS');
+  assert.equal(result.conclusion, 'PASS');
+
+  let invalidAttempts = 0;
+  const stillInvalid = await runReview({
+    getPullRequest: async () => ({ ...baseContext, isFork: false, changedFiles: ['docs/guide.md'] }),
+    getDiff: async () => 'diff --git a/docs/guide.md b/docs/guide.md',
+    readPolicy: async () => '# PR 安全审查门禁',
+    callModel: async () => {
+      invalidAttempts += 1;
+      return review({ sensitiveSurfaces: [] });
+    },
+    getArchitectureInputs: async () => passingArchitectureInputs(),
+    upsertComment: async () => {},
+  });
+
+  assert.equal(invalidAttempts, 2);
+  assert.equal(stillInvalid.conclusion, 'BLOCK');
+  assert.match(stillInvalid.diagnostic, /sensitiveSurfaces 必须是对象/);
 });
 
 test('DeepSeek 截断 JSON 时报告 finish_reason，而不是泛化成 JSON 解析错误', async () => {
@@ -1273,6 +1368,9 @@ test('同名 legacy status 不能伪造架构负责人审批', async () => {
     if (url.includes('/contents/.pr-security-gate/debt.json')) return encodeFile(debt);
     if (url.includes('/git/trees/')) return new Response(JSON.stringify({ truncated: false, tree: [] }));
     if (url.includes('/commits/merge1234/check-runs')) {
+      return new Response(JSON.stringify({ total_count: 0, check_runs: [] }));
+    }
+    if (url.includes('/commits/head1234/check-runs')) {
       return new Response(JSON.stringify({ total_count: 0, check_runs: [] }));
     }
     if (url.includes('/commits/merge1234/status')) {
