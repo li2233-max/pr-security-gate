@@ -798,6 +798,38 @@ test('模型调用失败会产生 BLOCK 而不是 PASS', async () => {
 
   assert.equal(result.conclusion, 'BLOCK');
   assert.match(comment, /安全审查不可用或输出无效/);
+  assert.match(comment, /安全审查状态：不可用（未完成）/);
+  assert.match(comment, /风险清单未生成/);
+  assert.match(comment, /本 PR 技术债：未能判定/);
+  assert.match(comment, /无法可靠分类敏感面或推导逐项证据缺口/);
+  assert.doesNotMatch(comment, /接口：缺少当前候选 SHA/);
+  assert.doesNotMatch(comment, /未发现 P0、P1 或 P2 问题/);
+});
+
+test('DeepSeek 截断 JSON 时报告 finish_reason，而不是泛化成 JSON 解析错误', async () => {
+  const dependencies = createWorkflowDependencies({
+    event: {
+      number: 1,
+      pull_request: {
+        base: { ref: 'main', sha: 'base1234' },
+        head: { ref: 'feature/review', sha: 'head1234', repo: { fork: false } },
+        merge_commit_sha: 'merge1234',
+      },
+    },
+    env: {
+      GITHUB_REPOSITORY: 'owner/repo',
+      GITHUB_TOKEN: 'github-token',
+      DEEPSEEK_API_KEY: 'deepseek-key',
+    },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: '{"conclusion":' }, finish_reason: 'length' }],
+    })),
+  });
+
+  await assert.rejects(
+    dependencies.callModel({ model: 'deepseek-v4-pro', prompt: '请输出合法 JSON。' }),
+    /finish_reason=length/,
+  );
 });
 
 test('fork PR 不读取 diff 也不调用模型', async () => {
@@ -1120,7 +1152,7 @@ test('base 与候选合并态都必须提供有效债务账本', async () => {
   );
 });
 
-test('工作流从固定 base/candidate SHA 构建组合架构态并复用未变 blob', async () => {
+test('架构快照跳过契约范围内的 PNG，并从固定 SHA 构建组合态', async () => {
   const event = {
     number: 9,
     pull_request: {
@@ -1163,7 +1195,10 @@ test('工作流从固定 base/candidate SHA 构建组合架构态并复用未变
     if (url.endsWith('/git/trees/base1234?recursive=1')) {
       return new Response(JSON.stringify({
         truncated: false,
-        tree: [{ type: 'blob', path: 'src/a/a.js', sha: 'blob-a', size: 24 }],
+        tree: [
+          { type: 'blob', path: 'src/a/a.js', sha: 'blob-a', size: 24 },
+          { type: 'blob', path: 'src/a/assets/poster.png', sha: 'blob-png', size: 24 },
+        ],
       }));
     }
     if (url.endsWith('/git/trees/merge1234?recursive=1')) {
@@ -1172,14 +1207,19 @@ test('工作流从固定 base/candidate SHA 构建组合架构态并复用未变
         tree: [
           { type: 'blob', path: 'src/a/a.js', sha: 'blob-a', size: 24 },
           { type: 'blob', path: 'src/b/b.js', sha: 'blob-b', size: 24 },
+          { type: 'blob', path: 'src/a/assets/poster.png', sha: 'blob-png', size: 24 },
         ],
       }));
     }
     if (url.includes('/git/blobs/')) {
       const sha = url.split('/').at(-1);
       blobCalls.push(sha);
-      const content = sha === 'blob-a' ? 'import "@app/b/service"' : 'import "@app/a/service"';
-      return new Response(JSON.stringify({ encoding: 'base64', content: Buffer.from(content).toString('base64') }));
+      const content = sha === 'blob-a'
+        ? Buffer.from('import "@app/b/service"')
+        : sha === 'blob-b'
+          ? Buffer.from('import "@app/a/service"')
+          : Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+      return new Response(JSON.stringify({ encoding: 'base64', content: content.toString('base64') }));
     }
     throw new Error(`未预期请求：${url} ${options.method ?? 'GET'}`);
   };
@@ -1197,6 +1237,7 @@ test('工作流从固定 base/candidate SHA 构建组合架构态并复用未变
   assert.equal(result.conclusion, 'BLOCK');
   assert.equal(result.newViolations.some(item => item.kind === 'cycle'), true);
   assert.equal(blobCalls.filter(sha => sha === 'blob-a').length, 1);
+  assert.equal(blobCalls.filter(sha => sha === 'blob-png').length, 1);
 });
 
 test('同名 legacy status 不能伪造架构负责人审批', async () => {
@@ -1317,6 +1358,7 @@ test('工作流依赖使用 GitHub API 和 DeepSeek，并更新已有报告评�
   assert.equal(deepSeekCall.options.headers.authorization, 'Bearer deepseek-key');
   const deepSeekBody = JSON.parse(deepSeekCall.options.body);
   assert.equal(deepSeekBody.model, 'deepseek-v4-pro');
+  assert.equal(deepSeekBody.max_tokens, 16_384);
   assert.equal(deepSeekBody.messages[0].role, 'system');
   assert.match(deepSeekBody.messages[0].content, /不可信数据/);
   assert.deepEqual(deepSeekBody.messages[1], { role: 'user', content: '审查 diff' });
