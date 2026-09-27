@@ -109,6 +109,11 @@ export function redact(value) {
     .replace(/\b(api[_-]?key|token|secret|password)\s*[:=]\s*[^\s'"`]+/gi, '$1=[REDACTED]');
 }
 
+export function formatFatalError(error) {
+  const detail = error instanceof Error ? error.stack ?? error.message : String(error);
+  return redact(detail).slice(0, 4_000);
+}
+
 function isBinaryContent(buffer) {
   if (buffer.includes(0)) return true;
   if (buffer.length === 0) return false;
@@ -1455,8 +1460,8 @@ export async function main({ env = process.env, fetchImpl = globalThis.fetch, re
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch(() => {
-    console.error('pr-security-gate 执行失败，禁止合并。');
+  main().catch(error => {
+    console.error(`pr-security-gate 执行失败，禁止合并。\n${formatFatalError(error)}`);
     process.exitCode = 1;
   });
 }

@@ -2,8 +2,16 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { assertReviewableDiff, createWorkflowDependencies, redact, renderReport, runReview, validateReview } from './pr-ai-review.mjs';
+import { assertReviewableDiff, createWorkflowDependencies, formatFatalError, redact, renderReport, runReview, validateReview } from './pr-ai-review.mjs';
 import { evaluateArchitectureGate } from './architecture-gate.mjs';
+
+test('formatFatalError reports the real error while redacting credentials', () => {
+  const diagnostic = formatFatalError(new Error('GitHub request failed: Bearer github_pat_1234567890abcdef'));
+
+  assert.match(diagnostic, /GitHub request failed/);
+  assert.match(diagnostic, /\[REDACTED\]/);
+  assert.doesNotMatch(diagnostic, /github_pat_1234567890abcdef/);
+});
 
 const surfaceNames = ['接口', '认证', '鉴权', '权限', '数据', '文件', '配置', '依赖', 'CI', '架构'];
 
