@@ -1047,8 +1047,13 @@ export function createWorkflowDependencies({
 
   function assertCurrentPullRequest(latest) {
     const latestCandidateSha = latest?.merge_commit_sha || latest?.head?.sha;
-    if (latest?.state !== 'open' || latest?.base?.sha !== baseSha || latest?.head?.sha !== headSha || latestCandidateSha !== candidateSha) {
-      throw new ReviewGateError('PR base/head SHA 已变化，旧审查结果失效');
+    const differences = [];
+    if (latest?.state !== 'open') differences.push(`state: expected open, actual ${String(latest?.state ?? 'missing')}`);
+    if (latest?.base?.sha !== baseSha) differences.push(`base.sha: expected ${baseSha}, actual ${String(latest?.base?.sha ?? 'missing')}`);
+    if (latest?.head?.sha !== headSha) differences.push(`head.sha: expected ${headSha}, actual ${String(latest?.head?.sha ?? 'missing')}`);
+    if (latestCandidateSha !== candidateSha) differences.push(`merge_commit_sha: expected ${candidateSha}, actual ${String(latestCandidateSha ?? 'missing')}`);
+    if (differences.length > 0) {
+      throw new ReviewGateError(`PR 快照校验失败，旧审查结果失效：${differences.join('; ')}`);
     }
     return latest;
   }
