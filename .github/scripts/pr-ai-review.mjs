@@ -663,9 +663,9 @@ function workflowContext(event, env) {
     const baseSha = requireText(pullRequest.base?.sha, 'pull_request.base.sha');
     const headSha = requireText(pullRequest.head?.sha, 'pull_request.head.sha');
     const mergeSha = requireText(
-      typeof pullRequest.merge_commit_sha === 'string' && pullRequest.merge_commit_sha !== ''
-        ? pullRequest.merge_commit_sha
-        : env.GITHUB_SHA,
+      typeof env.GITHUB_SHA === 'string' && env.GITHUB_SHA !== ''
+        ? env.GITHUB_SHA
+        : pullRequest.merge_commit_sha,
       'pull_request.merge_commit_sha/GITHUB_SHA',
     );
     return {
