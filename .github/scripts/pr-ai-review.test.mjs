@@ -1000,6 +1000,31 @@ test('SHA 漂移时不发布旧报告', async () => {
   assert.equal(published, false);
 });
 
+test('PR freshness failure identifies which snapshot field changed', async () => {
+  const dependencies = createWorkflowDependencies({
+    event: {
+      number: 8,
+      pull_request: {
+        base: { ref: 'main', sha: 'base1234' },
+        head: { ref: 'feature/review', sha: 'head1234', repo: { fork: false } },
+        merge_commit_sha: 'merge1234',
+      },
+    },
+    env: { GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'github-token' },
+    fetchImpl: async () => new Response(JSON.stringify({
+      state: 'open',
+      base: { sha: 'base1234' },
+      head: { sha: 'head1234' },
+      merge_commit_sha: 'merge5678',
+    })),
+  });
+
+  await assert.rejects(
+    dependencies.ensureFreshContext(),
+    /merge_commit_sha: expected merge1234, actual merge5678/,
+  );
+});
+
 test('merge_group 使用目标分支最新 SHA 审查组合态，并写入 job summary', async () => {
   const event = {
     action: 'checks_requested',
