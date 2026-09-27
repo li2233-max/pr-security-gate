@@ -363,6 +363,10 @@ test('工作流从当前 PR、候选 SHA Check Runs 和 Code Scanning 采集证�
     evidenceAfterWorkflowChange.find(item => item.name === 'authorization-tests').verified,
     false,
   );
+  assert.match(
+    evidenceAfterWorkflowChange.find(item => item.name === 'authorization-tests').summary,
+    /本次 PR 修改了执行控制文件.*\.github\/workflows\/reusable-security-check\.yml/,
+  );
   const scanningAfterWorkflowChange = evidenceAfterWorkflowChange.find(item => item.source === 'code_scanning_analysis');
   assert.equal(scanningAfterWorkflowChange.status, 'unavailable');
   assert.equal(scanningAfterWorkflowChange.verified, false);
@@ -871,6 +875,76 @@ test('DeepSeek 的 PASS JSON 生成可更新的报告', async () => {
 
   assert.equal(result.conclusion, 'PASS');
   assert.match(comment, /判定结果：PASS/);
+});
+
+test('模型收到固定 SHA 的架构预检事实，已有契约不会被当成未提供', async () => {
+  let prompt;
+  let reads = 0;
+  const result = await runReview({
+    getPullRequest: async () => ({ ...baseContext, isFork: false }),
+    getDiff: async () => 'diff --git a/src/app.js b/src/app.js\n@@ -0,0 +1 @@\n+const ok = true;',
+    getArchitectureInputs: async () => {
+      reads += 1;
+      return passingArchitectureInputs({
+        candidateFiles: [{ path: 'src/app.js', content: 'const secret = "not-for-model-context";' }],
+      });
+    },
+    readPolicy: async () => '# policy',
+    callModel: async request => { prompt = request.prompt; return review(); },
+    upsertComment: async () => {},
+  });
+
+  const facts = JSON.parse(prompt.match(/^架构预检事实：(.*)$/m)?.[1] ?? 'null');
+  assert.ok(facts, '模型必须收到程序实际检查到的架构事实');
+  assert.equal(facts.baseSha, 'base1234');
+  assert.equal(facts.candidateSha, 'merge1234');
+  assert.equal(facts.configured, true);
+  assert.equal(facts.conclusion, 'PASS');
+  assert.equal(facts.baseDebtCount, 0);
+  assert.equal(facts.candidateDebtCount, 0);
+  assert.equal(reads, 1, '最终债务判定必须复用同一份固定 SHA 快照');
+  assert.doesNotMatch(prompt, /not-for-model-context/);
+  assert.equal(result.conclusion, 'PASS');
+});
+
+test('架构预检失败如实传给模型，模型 PASS 仍不能覆盖缺失契约或读取失败', async () => {
+  for (const getInputs of [
+    async () => ({ contract: null }),
+    async () => { throw new Error('base ledger read failed: Bearer github_pat_1234567890abcdef'); },
+  ]) {
+    let prompt;
+    const result = await runReview({
+      getPullRequest: async () => ({ ...baseContext, isFork: false }),
+      getDiff: async () => 'diff --git a/docs/guide.md b/docs/guide.md',
+      getArchitectureInputs: getInputs,
+      readPolicy: async () => '# policy',
+      callModel: async request => { prompt = request.prompt; return review(); },
+      upsertComment: async () => {},
+    });
+
+    const facts = JSON.parse(prompt.match(/^架构预检事实：(.*)$/m)?.[1] ?? 'null');
+    assert.ok(facts);
+    assert.equal(facts.conclusion, 'BLOCK');
+    assert.doesNotMatch(prompt, /github_pat_1234567890abcdef/);
+    assert.equal(result.securityConclusion, 'PASS');
+    assert.equal(result.conclusion, 'BLOCK');
+  }
+});
+
+test('架构预检 PASS 后仍核对 AI 新发现的 P1/P2 是否登记到账本', async () => {
+  const result = await runReview({
+    getPullRequest: async () => ({ ...baseContext, isFork: false }),
+    getDiff: async () => 'diff --git a/src/app.js b/src/app.js\n@@ -0,0 +1 @@\n+return [];',
+    getArchitectureInputs: async () => passingArchitectureInputs(),
+    readPolicy: async () => '# policy',
+    callModel: async () => review({ risks: [risk('P1', '失败被误表示为空结果', { location: 'src/app.js:1' })] }),
+    upsertComment: async () => {},
+  });
+
+  assert.equal(result.securityConclusion, 'PASS');
+  assert.equal(result.conclusion, 'BLOCK');
+  assert.equal(result.architecture.debt.missingCurrentItems.length, 1);
+  assert.equal(result.architecture.debt.missingCurrentItems[0].path, 'src/app.js');
 });
 
 test('模型调用失败会产生 BLOCK 而不是 PASS', async () => {
