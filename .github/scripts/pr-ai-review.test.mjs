@@ -823,6 +823,29 @@ test('pull_request 缺少候选 merge SHA 时不得退化为只审查 head', () 
   }), /merge_commit_sha\/GITHUB_SHA/);
 });
 
+test('pull_request 候选 SHA 优先使用本次运行的 GITHUB_SHA，而不是可能滞后的事件字段', async () => {
+  const dependencies = createWorkflowDependencies({
+    event: {
+      number: 8,
+      pull_request: {
+        base: { ref: 'main', sha: 'base1234' },
+        head: { ref: 'feature/review', sha: 'head1234', repo: { fork: false } },
+        merge_commit_sha: 'stale-merge1234',
+      },
+    },
+    env: {
+      GITHUB_REPOSITORY: 'owner/repo',
+      GITHUB_TOKEN: 'github-token',
+      GITHUB_SHA: 'current-merge1234',
+    },
+    fetchImpl: async () => new Response(),
+  });
+
+  const context = await dependencies.getPullRequest();
+
+  assert.equal(context.mergeSha, 'current-merge1234');
+});
+
 test('DeepSeek 的 PASS JSON 生成可更新的报告', async () => {
   let comment = '';
   const result = await runReview({
