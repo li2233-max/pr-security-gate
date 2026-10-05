@@ -141,7 +141,16 @@ export function parseTreeEntries(treeOutput) {
 }
 
 export function prepareSnapshotForDocker(snapshot) {
-  chmodSync(snapshot, 0o755);
+  const makeDirectoriesTraversable = (directory) => {
+    chmodSync(directory, 0o755);
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const child = join(directory, entry.name);
+      const stat = lstatSync(child);
+      if (stat.isSymbolicLink()) fail('candidate snapshot contains a symbolic link');
+      if (stat.isDirectory()) makeDirectoriesTraversable(child);
+    }
+  };
+  makeDirectoriesTraversable(snapshot);
 }
 
 function walkFiles(root, relative = '') {
@@ -163,7 +172,6 @@ function createSnapshot(parent) {
   requireSuccess(tree, 'candidate tree inspection');
   const entries = parseTreeEntries(tree.stdout);
   const snapshot = mkdtempSync(join(parent, 'candidate-'));
-  prepareSnapshotForDocker(snapshot);
   let totalBytes = 0;
   for (const entry of entries) {
     const blob = safeRun('git', ['-C', candidateRoot, 'cat-file', 'blob', entry.sha], { maxBuffer: MAX_SNAPSHOT_FILE_BYTES });
@@ -181,6 +189,7 @@ function createSnapshot(parent) {
       rmSync(join(snapshot, ...file.split('/')), { force: true });
     }
   }
+  prepareSnapshotForDocker(snapshot);
   return snapshot;
 }
 
