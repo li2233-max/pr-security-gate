@@ -31,7 +31,7 @@ test('pins the exact valid Semgrep ruleset bytes in the verification profile', a
 
 test('approves only the published immutable verifier release for weixin', async () => {
   const approved = JSON.parse(await readFile(new URL('./approved-verifiers.json', import.meta.url), 'utf8'));
-  assert.equal(approved.verifiers['weixin-v1'].sha, 'd47621ff720f8c0f4cb109007a4a24a3c7f00f67');
+  assert.equal(approved.verifiers['weixin-v1'].sha, '7e696f1668fcf0a5c928d6863cae9a2e7209da84');
 });
 
 test('rejects unknown keys and unsupported schema versions', () => {
