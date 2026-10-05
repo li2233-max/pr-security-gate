@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { workflowRunHeadSha } from '../.github/scripts/publish-verification-manifest.mjs';
 
 const workflowPath = new URL('../.github/workflows/pr-ai-review.yml', import.meta.url);
 const verifierWorkflowPath = new URL('../.github/workflows/independent-ci-verification.yml', import.meta.url);
@@ -50,6 +51,13 @@ test('候选仓库不能通过自带 Gitleaks 配置或忽略文件修改中心�
   const runner = await readFile(new URL('../.github/scripts/independent-ci-check.mjs', import.meta.url), 'utf8');
   assert.match(runner, /['"]\.gitleaks\.toml['"]/);
   assert.match(runner, /['"]\.gitleaksignore['"]/);
+});
+
+test('PR 运行的 GitHub head SHA 与候选合并 SHA 分开校验', () => {
+  const headSha = 'a'.repeat(40);
+  const mergeSha = 'b'.repeat(40);
+  assert.equal(workflowRunHeadSha('pull_request', { pull_request: { head: { sha: headSha } } }, mergeSha), headSha);
+  assert.equal(workflowRunHeadSha('merge_group', {}, mergeSha), mergeSha);
 });
 
 test('独立验证项目模板只调用固定中心工作流且没有 PR 可控步骤或 Secret', async () => {

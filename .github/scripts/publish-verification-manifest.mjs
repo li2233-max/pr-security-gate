@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseVerificationProfile } from '../../profiles/verification-profile.mjs';
 import { readFileSync } from 'node:fs';
 
@@ -9,6 +9,16 @@ const profile = parseVerificationProfile(JSON.parse(readFileSync(resolve(verifie
 
 function fail(message) {
   throw new Error(message);
+}
+
+export function workflowRunHeadSha(eventName, event, candidateSha) {
+  const value = eventName === 'pull_request'
+    ? event?.pull_request?.head?.sha
+    : eventName === 'merge_group'
+      ? candidateSha
+      : null;
+  if (!/^[a-f0-9]{40}$/.test(value ?? '')) fail('workflow run head SHA is invalid for the event');
+  return value;
 }
 
 function positiveCount(value, label) {
@@ -70,6 +80,8 @@ async function main() {
   let queueRef = null;
   let queueParentSha = null;
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+  const runHeadSha = workflowRunHeadSha(eventName, event, candidateSha);
+  if (run.head_sha !== runHeadSha) fail('workflow run head SHA does not match the event snapshot');
   if (eventName === 'pull_request') {
     pullRequestNumber = Number(event.number);
     if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber < 1) fail('pull request number is invalid');
@@ -110,7 +122,9 @@ async function main() {
   writeFileSync(resolve(process.cwd(), 'verification.json'), `${JSON.stringify(manifest)}\n`, { mode: 0o600, flag: 'wx' });
 }
 
-main().catch(error => {
-  console.error(String(error?.message ?? 'manifest publication failed').replace(/[\r\n]/g, ' ').slice(0, 300));
-  process.exitCode = 1;
-});
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  main().catch(error => {
+    console.error(String(error?.message ?? 'manifest publication failed').replace(/[\r\n]/g, ' ').slice(0, 300));
+    process.exitCode = 1;
+  });
+}
