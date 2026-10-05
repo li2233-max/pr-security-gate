@@ -34,6 +34,27 @@ function safeRun(command, args, options = {}) {
   return result;
 }
 
+function outputText(value) {
+  return Buffer.isBuffer(value) ? value.toString('utf8') : String(value ?? '');
+}
+
+export function summarizeProcessFailure(label, result) {
+  const stdout = outputText(result.stdout);
+  const stderr = outputText(result.stderr);
+  const tests = [...stdout.matchAll(/^not ok \d+ - ([^\r\n(]{1,120})/gm)]
+    .map(([, name]) => name.replace(/[^A-Za-z0-9 _./:-]/g, '?').trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  const errorCode = `${stdout}\n${stderr}`.match(/\b(EAI_AGAIN|ENOTFOUND|EAI_FAIL|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EACCES|EPERM|EROFS|ENOENT)\b/)?.[1];
+  const filesystemIssue = /read-only file system/i.test(`${stdout}\n${stderr}`);
+  const exit = Number.isInteger(result.status) ? `exit code ${result.status}` : `signal ${String(result.signal ?? 'unknown')}`;
+  const details = [];
+  if (tests.length) details.push(`failed test cases: ${tests.join('; ')}`);
+  if (errorCode) details.push(`process error: ${errorCode}`);
+  if (filesystemIssue && !errorCode) details.push('process error: read-only filesystem');
+  return `${label} failed with ${exit}${details.length ? ` (${details.join('; ')})` : ''}`;
+}
+
 function requireSuccess(result, label) {
   if (result.status !== 0) fail(`${label} failed with exit code ${result.status ?? 'unknown'}`);
 }
@@ -221,11 +242,17 @@ async function runSecretScan(snapshot) {
     requireSuccess(unpack, 'Gitleaks archive extraction');
     const report = join(temp, 'report.json');
     const scan = safeRun(join(temp, 'gitleaks'), ['dir', '--redact', '--no-banner', '--no-color', '--exit-code', '1', '--report-format', 'json', '--report-path', report, snapshot]);
-    if (scan.status !== 0) fail(`Gitleaks found a secret or failed with exit code ${scan.status ?? 'unknown'}`);
-    if (!existsSync(report)) fail('Gitleaks did not create its required report');
+    if (!existsSync(report)) {
+      if (scan.status !== 0) fail(summarizeProcessFailure('Gitleaks scan', scan));
+      fail('Gitleaks did not create its required report');
+    }
     const findings = JSON.parse(readFileSync(report, 'utf8'));
     if (!Array.isArray(findings)) fail('Gitleaks report schema is invalid');
-    if (findings.length) fail('Gitleaks found one or more secrets');
+    if (findings.length) {
+      const rules = [...new Set(findings.map(item => item.RuleID).filter(value => /^[A-Za-z0-9_-]{1,60}$/.test(value ?? '')))].slice(0, 3);
+      fail(`Gitleaks found ${findings.length} finding(s)${rules.length ? ` (${rules.join(', ')})` : ''}`);
+    }
+    if (scan.status !== 0) fail(summarizeProcessFailure('Gitleaks scan', scan));
     return targets.count;
   } finally {
     rmSync(temp, { recursive: true, force: true });
@@ -244,9 +271,23 @@ async function runSemgrep(snapshot) {
       commandArgs: ['scan', '--config', '/rules.yml', '--json', '--error', '--strict', '--metrics=off', '--disable-version-check', '--no-git-ignore', ...targets.roots.map(root => `/src/${root}`)],
     }),
   ]);
-  if (result.status !== 0) fail(`Semgrep found a security issue or failed with exit code ${result.status ?? 'unknown'}`);
   let report;
   try { report = JSON.parse(result.stdout.toString('utf8')); } catch { fail('Semgrep output is not valid JSON'); }
+  if (result.status !== 0) {
+    if (Number.isSafeInteger(report?.results?.length) && report.results.length) {
+      const locations = report.results.slice(0, 3).map(item => {
+        const rule = /^[A-Za-z0-9_.-]{1,100}$/.test(item.check_id ?? '') ? item.check_id : 'security rule';
+        const line = Number.isSafeInteger(item.start?.line) ? item.start.line : '?';
+        return `${rule} at line ${line}`;
+      });
+      fail(`Semgrep found ${report.results.length} security finding(s): ${locations.join('; ')}`);
+    }
+    const errorKinds = Array.isArray(report?.errors)
+      ? report.errors.map(error => `${String(error?.type ?? 'scanner error').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)}${Number.isSafeInteger(error?.code) ? `#${error.code}` : ''}`).filter(Boolean).slice(0, 3)
+      : [];
+    if (errorKinds.length) fail(`Semgrep scanner reported ${errorKinds.join(', ')}`);
+    fail(summarizeProcessFailure('Semgrep scan', result));
+  }
   if (!Number.isSafeInteger(report?.results?.length) || !report?.paths?.scanned?.length) fail('Semgrep report is empty or malformed');
   if (report.results.length) fail('Semgrep found one or more security issues');
   return report.paths.scanned.length;
@@ -262,9 +303,20 @@ async function runDependencyScan(snapshot) {
       commandArgs: ['audit', '--prefix', '/src/miniprogram', '--omit=dev', '--audit-level=high', '--json', '--registry=https://registry.npmjs.org'],
     }),
   ]);
-  if (audit.status !== 0) fail(`npm audit found a vulnerability or failed with exit code ${audit.status ?? 'unknown'}`);
   let report;
-  try { report = JSON.parse(audit.stdout.toString('utf8')); } catch { fail('npm audit output is not valid JSON'); }
+  try { report = JSON.parse(audit.stdout.toString('utf8')); } catch {
+    if (audit.status !== 0) fail(summarizeProcessFailure('npm audit', audit));
+    fail('npm audit output is not valid JSON');
+  }
+  if (audit.status !== 0) {
+    const vulnerabilities = report?.metadata?.vulnerabilities;
+    if (Number.isSafeInteger(vulnerabilities?.total) && vulnerabilities.total > 0) {
+      fail(`npm audit found ${vulnerabilities.total} vulnerability/vulnerabilities (high=${vulnerabilities.high ?? 0}, critical=${vulnerabilities.critical ?? 0})`);
+    }
+    const registryCode = /^[A-Z0-9_]{1,40}$/.test(report?.error?.code ?? '') ? report.error.code : null;
+    if (registryCode) fail(`npm audit reported a registry error (${registryCode})`);
+    fail(summarizeProcessFailure('npm audit', audit));
+  }
   if (!Number.isSafeInteger(report?.metadata?.dependencies?.prod)) fail('npm audit report is incomplete');
   return Math.max(1, report.metadata.dependencies.prod);
 }
@@ -302,7 +354,7 @@ async function runTrustedTests(snapshot, files) {
       commandArgs: ['--test', ...files.map(file => `/src/${file.path}`)],
     }),
   ]);
-  if (result.status !== 0) fail(`trusted tests failed in the isolated container with exit code ${result.status ?? 'unknown'}`);
+  if (result.status !== 0) fail(summarizeProcessFailure('trusted tests in the isolated container', result));
   return files.length;
 }
 

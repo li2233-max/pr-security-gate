@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { evidenceTypeForCheck, parseVerificationProfile, VerificationProfileError } from './verification-profile.mjs';
 
@@ -20,6 +21,12 @@ test('accepts the centrally pinned weixin verification profile', () => {
     'production-hardening-tests',
   ]);
   assert.equal(parsed.trustedTests.length, 2);
+});
+
+test('pins the exact valid Semgrep ruleset bytes in the verification profile', async () => {
+  const rules = await readFile(new URL('./weixin-semgrep-rules.yml', import.meta.url), 'utf8');
+  const canonicalRules = Buffer.from(rules.replace(/\r\n/g, '\n'), 'utf8');
+  assert.equal(profile.tools.semgrep.rulesetSha256, createHash('sha256').update(canonicalRules).digest('hex'));
 });
 
 test('rejects unknown keys and unsupported schema versions', () => {

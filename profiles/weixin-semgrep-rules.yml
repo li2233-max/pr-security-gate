@@ -7,7 +7,7 @@ rules:
       - pattern: crypto.createDecipheriv($ALG, $KEY, $IV)
       - metavariable-regex:
           metavariable: $ALG
-          regex: [\"']aes-(128|192|256)-gcm[\"']
+          regex: "[\\\"']aes-(128|192|256)-gcm[\\\"']"
     paths:
       include:
         - cloudbase/cloudfunctions/**/*.js
