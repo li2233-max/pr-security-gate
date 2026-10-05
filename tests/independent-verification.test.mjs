@@ -90,6 +90,7 @@ test('pinned Semgrep scans files in a restrictive isolated snapshot', { skip: pr
       ], { encoding: 'utf8', timeout: 30_000 });
       const scan = spawnSync('docker', [
         'run', '--rm', '--network', 'none', '--read-only', '--user', '65532:65532',
+        '--tmpfs=/tmp:rw,noexec,nosuid,size=128m', '-e', 'HOME=/tmp',
         '--mount', `type=bind,src=${snapshot},dst=/src,readonly`,
         '--mount', `type=bind,src=${join(process.cwd(), 'profiles', 'weixin-semgrep-rules.yml')},dst=/rules.yml,readonly`,
         '--workdir', '/src', '--entrypoint', 'semgrep', profile.tools.semgrep.image,
@@ -97,7 +98,7 @@ test('pinned Semgrep scans files in a restrictive isolated snapshot', { skip: pr
       ], { encoding: 'utf8', timeout: 30_000 });
       const scanReport = JSON.parse(scan.stdout || '{}');
       const statusLines = String(scan.stderr).split(/\r?\n/).filter(line => /Scanning \d+ files?|No rules to run|Skipped|excluded/i.test(line)).slice(0, 8);
-      throw new Error(`${error.message}; isolated file probe: exit ${probe.status}, ${String(probe.stderr).slice(0, 200)}; Semgrep probe: exit ${scan.status}, scanned=${scanReport.paths?.scanned?.length}, skipped=${scanReport.paths?.skipped?.length}, skippedRules=${scanReport.skipped_rules?.length}, stderr=${statusLines.join(' | ')}`);
+      throw new Error(`${error.message}; isolated file probe: exit ${probe.status}, ${String(probe.stderr).slice(0, 200)}; Semgrep probe: exit ${scan.status}, scanned=${scanReport.paths?.scanned?.length}, skipped=${scanReport.paths?.skipped?.length}, skippedRules=${scanReport.skipped_rules?.length}, stderr=${statusLines.join(' | ') || String(scan.stderr).slice(0, 200)}`);
     }
   } finally {
     rmSync(snapshot, { recursive: true, force: true });
