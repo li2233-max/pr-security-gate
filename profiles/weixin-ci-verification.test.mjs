@@ -24,8 +24,9 @@ test('accepts the centrally pinned weixin verification profile', () => {
 });
 
 test('pins the exact valid Semgrep ruleset bytes in the verification profile', async () => {
-  const rules = await readFile(new URL('./weixin-semgrep-rules.yml', import.meta.url));
-  assert.equal(profile.tools.semgrep.rulesetSha256, createHash('sha256').update(rules).digest('hex'));
+  const rules = await readFile(new URL('./weixin-semgrep-rules.yml', import.meta.url), 'utf8');
+  const canonicalRules = Buffer.from(rules.replace(/\r\n/g, '\n'), 'utf8');
+  assert.equal(profile.tools.semgrep.rulesetSha256, createHash('sha256').update(canonicalRules).digest('hex'));
 });
 
 test('rejects unknown keys and unsupported schema versions', () => {
