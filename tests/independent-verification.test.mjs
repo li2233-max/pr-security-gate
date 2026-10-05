@@ -2,7 +2,35 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { createWorkflowDependencies } from '../.github/scripts/pr-ai-review.mjs';
+import { summarizeProcessFailure } from '../.github/scripts/independent-ci-check.mjs';
 import { parseVerificationProfile } from '../profiles/verification-profile.mjs';
+
+test('isolated verifier failures expose safe diagnostics without echoing tool output', () => {
+  const summary = summarizeProcessFailure('trusted tests', {
+    status: 1,
+    signal: null,
+    stdout: Buffer.from('not ok 1 - payment callback rejects invalid resource\n# Subtest: harmless test\n'),
+    stderr: Buffer.from('Error: private-key-material-for-tests'),
+  });
+  assert.match(summary, /trusted tests failed with exit code 1/);
+  assert.match(summary, /payment callback rejects invalid resource/);
+  assert.doesNotMatch(summary, /private-key-material-for-tests/);
+});
+
+test('isolated verifier diagnostics identify common container and network failures', () => {
+  assert.match(summarizeProcessFailure('dependency audit', {
+    status: 1,
+    signal: null,
+    stdout: Buffer.alloc(0),
+    stderr: Buffer.from('getaddrinfo EAI_AGAIN registry.npmjs.org'),
+  }), /EAI_AGAIN/);
+  assert.match(summarizeProcessFailure('trusted tests', {
+    status: 1,
+    signal: null,
+    stdout: Buffer.alloc(0),
+    stderr: Buffer.from('read-only file system'),
+  }), /read-only filesystem/);
+});
 
 function zipStored(filename, content) {
   const name = Buffer.from(filename);
