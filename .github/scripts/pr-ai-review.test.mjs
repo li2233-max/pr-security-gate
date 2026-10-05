@@ -123,10 +123,14 @@ test('P1 和 P2 返回 PASS 且技术债只显示计数', () => {
     sensitiveChanged: false,
     evidenceForSensitivePath: true,
   });
-  const markdown = renderReport(baseContext, result);
+  const markdown = renderReport(baseContext, result, evaluateArchitectureGate(passingArchitectureInputs()));
 
   assert.equal(result.conclusion, 'PASS');
-  assert.match(markdown, /技术债：2 项/);
+  assert.match(markdown, /判定结果：PASS/);
+  assert.match(markdown, /本 PR 技术债：2 项/);
+  assert.match(markdown, /\[MEDIUM\] backend\/example\.py:10: 错误语义/);
+  assert.match(markdown, /-> 建议：区分失败、未匹配和成功结果/);
+  assert.doesNotMatch(markdown, /变更的敏感面：|累计技术债：|已验证证据：/);
   assert.doesNotMatch(markdown, /负责人：|Issue：|截止日期：|闭环状态：/);
 });
 
@@ -139,6 +143,18 @@ test('P0、无效结论和涉及访问控制但无证据均阻断合并', () => 
   assert.equal(p0.conclusion, 'BLOCK');
   assert.equal(insufficientEvidence.conclusion, 'BLOCK');
   assert.throws(() => validateReview({ conclusion: 'MAYBE' }, {}));
+});
+
+test('缺少可信证据时评论用一条可执行的阻断原因说明', () => {
+  const result = validateReview(review({
+    sensitiveSurfaces: surfaces({ 权限: { status: '涉及', reason: '变更资源访问控制' } }),
+  }));
+  const markdown = renderReport(baseContext, result, evaluateArchitectureGate(passingArchitectureInputs()));
+
+  assert.match(markdown, /判定结果：BLOCK/);
+  assert.match(markdown, /\[BLOCK\] 证据不足: .*权限/);
+  assert.match(markdown, /-> 建议：在当前候选提交上补齐可信检查/);
+  assert.doesNotMatch(markdown, /未验证、失败或不可用证据：|证据缺口：/);
 });
 
 test('“未提供 401/403”不能冒充访问控制证据', () => {
@@ -591,7 +607,7 @@ test('真实采集的授权 Check 即使未被模型复述也能满足门禁', a
   assert.match(prompt, /PR 正文.*未验证声明/);
 });
 
-test('报告按结构展示已验证证据与未验证声明', () => {
+test('PR 评论保留门禁结果，省略逐条证据和作者声明', () => {
   const verified = structuredEvidence();
   const claim = structuredEvidence({
     type: 'author_claim',
@@ -605,12 +621,11 @@ test('报告按结构展示已验证证据与未验证声明', () => {
     candidateSha: 'merge1234',
     collectedEvidence: [verified, claim],
   });
-  const markdown = renderReport(baseContext, result);
+  const markdown = renderReport(baseContext, result, evaluateArchitectureGate(passingArchitectureInputs()));
 
-  assert.match(markdown, /已验证证据/);
-  assert.match(markdown, /authorization-tests/);
+  assert.match(markdown, /判定结果：PASS/);
   assert.match(markdown, /merge1234/);
-  assert.match(markdown, /未验证声明/);
+  assert.doesNotMatch(markdown, /已验证证据：|未验证声明|authorization-tests|生产者=/);
   assert.doesNotMatch(markdown, /\[object Object\]/);
 });
 
@@ -781,7 +796,9 @@ test('存在明确 Secret 外传时仍作为 CI 专属 P0，且不追加无关�
   });
 
   assert.equal(result.conclusion, 'BLOCK');
-  assert.equal((comment.match(/\[P0\]/g) ?? []).length, 1);
+  assert.equal((comment.match(/\[HIGH\]/g) ?? []).length, 1);
+  assert.match(comment, /\[HIGH\] \.github\/workflows\/pr-ai-review\.yml:4: CI 工作流可能泄露 Secret/);
+  assert.match(comment, /-> 建议：恢复受信任工作流来源/);
   assert.doesNotMatch(comment, /未登录 401\/403|用户 A|用户 B/);
 });
 
@@ -959,12 +976,10 @@ test('模型调用失败会产生 BLOCK 而不是 PASS', async () => {
 
   assert.equal(result.conclusion, 'BLOCK');
   assert.match(comment, /安全审查不可用或输出无效/);
-  assert.match(comment, /安全审查状态：不可用（未完成）/);
-  assert.match(comment, /风险清单未生成/);
-  assert.match(comment, /本 PR 技术债：未能判定/);
-  assert.match(comment, /无法可靠分类敏感面或推导逐项证据缺口/);
+  assert.match(comment, /判定结果：BLOCK/);
+  assert.match(comment, /\[BLOCK\] 安全审查未完成/);
   assert.doesNotMatch(comment, /接口：缺少当前候选 SHA/);
-  assert.doesNotMatch(comment, /未发现 P0、P1 或 P2 问题/);
+  assert.doesNotMatch(comment, /未发现需修复的风险/);
 });
 
 test('DeepSeek 审查结构校验失败时最多纠正重试一次', async () => {
@@ -1079,9 +1094,9 @@ test('安全门禁 PASS 但架构门禁 BLOCK 时最终仍阻断', () => {
   assert.match(markdown, /安全门禁：PASS/);
   assert.match(markdown, /架构门禁：BLOCK/);
   assert.match(markdown, /判定结果：BLOCK/);
-  assert.match(markdown, /基线 → 候选：1 → 1/);
-  assert.match(markdown, /api：1 → 1/);
-  assert.match(markdown, /首次出现=2026-01-01/);
+  assert.match(markdown, /\[BLOCK\] src\/a: a -> b -> a/);
+  assert.match(markdown, /-> 建议：修复该架构违规并重新运行门禁/);
+  assert.doesNotMatch(markdown, /基线 → 候选|首次出现=2026-01-01/);
 });
 
 test('SHA 漂移时不发布旧报告', async () => {

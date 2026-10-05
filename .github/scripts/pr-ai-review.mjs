@@ -180,60 +180,6 @@ export function validateReview(raw, context = {}) {
   };
 }
 
-function bulletList(items, emptyText) {
-  return items.length === 0 ? `- 无：${emptyText}` : items.map(item => `- ${redact(item)}`).join('\n');
-}
-
-function compactEvidenceText(value, limit = 320) {
-  const text = redact(value).replace(/\s+/g, ' ').trim();
-  return text.length <= limit ? text : `${text.slice(0, limit)}…`;
-}
-
-function renderEvidenceItems(items, emptyText) {
-  if (items.length === 0) return `- 无：${emptyText}`;
-  return items.map(item => {
-    const label = evidenceTypeLabel(item.type, EVIDENCE_POLICY);
-    const producer = item.producer ? `；生产者=${compactEvidenceText(item.producer, 80)}` : '';
-    return `- [${compactEvidenceText(label, 80)}] ${compactEvidenceText(item.name, 120)}；状态=${item.status}；来源=${item.source}${producer}；SHA=${compactEvidenceText(item.sha, 80)}；${compactEvidenceText(item.summary)}；[查看证据](${item.url})`;
-  }).join('\n');
-}
-
-function renderEvidenceGaps(gaps, reviewStatus = 'completed') {
-  if (reviewStatus === 'unavailable') {
-    return '- 未能判定：安全审查未完成，无法可靠分类敏感面或推导逐项证据缺口。';
-  }
-  if (!Array.isArray(gaps) || gaps.length === 0) return '- 无：适用的必需证据均已满足。';
-  return gaps.map(gap => {
-    const alternatives = gap.anyOf.map(type => evidenceTypeLabel(type, EVIDENCE_POLICY)).join(' / ');
-    return `- ${redact(gap.surface)}：缺少当前候选 SHA 上通过且可信的 ${redact(alternatives)}。`;
-  }).join('\n');
-}
-
-function renderRisks(risks, reviewStatus = 'completed') {
-  if (risks.length === 0) {
-    return reviewStatus === 'unavailable'
-      ? '- 安全审查未完成，风险清单未生成；这不代表未发现风险。'
-      : '- 无：未发现 P0、P1 或 P2 问题。';
-  }
-  return risks.map(risk => {
-    const severity = RISK_LEVELS.get(risk.level);
-    const blocked = REVIEW_POLICY.riskLevels[risk.level].blocksMerge ? '是' : '否';
-    return [
-      `- [${risk.level}] [${severity}] ${redact(risk.title)}`,
-      `  - 规则：${redact(risk.ruleId)}`,
-      ...(risk.debtFingerprint ? [`  - 技术债指纹：${redact(risk.debtFingerprint)}`] : []),
-      `  - 位置：${redact(risk.location)}`,
-      `  - 类型：${redact(risk.type)}`,
-      `  - 依据或变更前后行为：${redact(risk.basis)}`,
-      `  - 攻击路径或失败路径：${redact(risk.path)}`,
-      `  - 影响范围：${redact(risk.impact)}`,
-      `  - 修复建议：${redact(risk.recommendation)}`,
-      `  - 是否阻塞合并：${blocked}`,
-      '  - 状态：未解决',
-    ].join('\n');
-  }).join('\n');
-}
-
 function defaultArchitectureResult() {
   return {
     configured: false,
@@ -264,138 +210,57 @@ function createArchitectureBlock(reason) {
   };
 }
 
-function renderArchitectureViolations(items, emptyText) {
-  if (!Array.isArray(items) || items.length === 0) return `- 无：${emptyText}`;
-  return items.map(item => {
-    const identity = item.ruleId ?? item.identity ?? 'architecture.unknown';
-    const location = item.path ?? item.component ?? '未提供';
-    return `- [${redact(identity)}] ${redact(item.message ?? '架构约束变化')}（${redact(location)}）`;
-  }).join('\n');
-}
-
-function renderDebtItems(items, emptyText, limit = 20) {
-  if (!Array.isArray(items) || items.length === 0) return `  - 无：${emptyText}`;
-  const visible = items.slice(0, limit).map(item => {
-    const firstSeen = item.firstSeen ?? '待填写';
-    return `  - [${redact(item.level ?? '未提供')}] ${redact(item.component ?? 'repository')} / ${redact(item.path ?? '未提供')}；规则=${redact(item.ruleId ?? '未提供')}；指纹=${redact(item.fingerprint ?? '未提供')}；首次出现=${redact(firstSeen)}`;
-  });
-  if (items.length > limit) visible.push(`  - 其余 ${items.length - limit} 项请查看候选债务账本。`);
-  return visible.join('\n');
-}
-
-function renderCumulativeDebt(architecture) {
-  if (!architecture.configured || !architecture.debt) {
-    return '- 未启用：目标仓库没有可用的架构契约与债务账本。';
-  }
-  const debt = architecture.debt;
-  const components = [...new Set([
-    ...Object.keys(debt.baseCounts ?? {}),
-    ...Object.keys(debt.candidateCounts ?? {}),
-  ])].sort();
-  const componentLines = components.length === 0
-    ? '  - 无组件债务。'
-    : components.map(name => `  - ${redact(name)}：${debt.baseCounts?.[name] ?? 0} → ${debt.candidateCounts?.[name] ?? 0}`).join('\n');
-  return [
-    `- 模式：${redact(debt.mode ?? '未提供')}`,
-    `- 基线 → 候选：${debt.baseCount ?? 0} → ${debt.candidateCount ?? 0}`,
-    '- 各组件基线 → 候选：',
-    componentLines,
-    `- 本次登记：${debt.newItems?.length ?? 0}`,
-    renderDebtItems(debt.newItems, '无新增登记。'),
-    `- 已有：${debt.existingItems?.length ?? 0}`,
-    renderDebtItems(debt.existingItems, '无历史债务。'),
-    `- 声明已解决、待证据复核：${debt.resolvedItems?.length ?? 0}`,
-    renderDebtItems(debt.resolvedItems, '无。'),
-    `- 本次发现但未登记：${debt.missingCurrentItems?.length ?? 0}`,
-    renderDebtItems(debt.missingCurrentItems, '无。'),
-    `- 本次登记等级不一致：${debt.mismatchedCurrentItems?.length ?? 0}`,
-    renderDebtItems(debt.mismatchedCurrentItems, '无。'),
-    `- 已逾期：${debt.overdueItems?.length ?? 0}`,
-    renderDebtItems(debt.overdueItems, '无。'),
-    `- 首次出现时间无效：${debt.futureFirstSeenItems?.length ?? 0}`,
-    renderDebtItems(debt.futureFirstSeenItems, '无。'),
-  ].join('\n');
-}
-
 function finalGateConclusion(review, architecture) {
   return review.conclusion === 'BLOCK' || architecture.conclusion === 'BLOCK' ? 'BLOCK' : 'PASS';
 }
 
 export function renderReport(context, review, architecture = defaultArchitectureResult()) {
-  const surfaceLines = SURFACE_NAMES.map(name => {
-    const surface = review.sensitiveSurfaces[name];
-    return `- ${name}：${surface.status}；${redact(surface.reason)}`;
-  }).join('\n');
-  const evidence = Array.isArray(review.evidence) ? review.evidence : [];
-  const verifiedEvidence = evidence.filter(item => item.verified);
-  const claims = evidence.filter(item => item.source === 'pr_assertion');
-  const unavailableEvidence = evidence.filter(item => !item.verified && item.source !== 'pr_assertion');
   const finalConclusion = finalGateConclusion(review, architecture);
-  const mergeAction = finalConclusion === 'BLOCK' ? '禁止合并' : '可合并';
-  const reviewMode = context.reviewMode ?? '未提供';
+  const brief = (value, limit = 320) => {
+    const line = redact(value ?? '').replace(/\s+/g, ' ').trim();
+    return line.length <= limit ? line : `${line.slice(0, limit - 1)}…`;
+  };
+  const issue = (level, location, reason, recommendation) => [
+    `[${level}] ${brief(location, 180)}: ${brief(reason)}`,
+    `  -> 建议：${brief(recommendation, 240)}`,
+  ].join('\n');
+  const problems = [];
+
+  if (review.reviewStatus === 'unavailable') {
+    problems.push(issue('BLOCK', '安全审查未完成', review.summary, '检查审查运行日志，修复错误后重跑门禁。'));
+  } else {
+    for (const risk of review.risks) {
+      const reason = `${risk.title}：${risk.basis}；影响：${risk.impact}`;
+      problems.push(issue(RISK_LEVELS.get(risk.level), risk.location, reason, risk.recommendation));
+    }
+    if (review.evidenceGaps.length > 0) {
+      const missing = review.evidenceGaps.map(gap => (
+        `${gap.surface}（${gap.anyOf.map(type => evidenceTypeLabel(type, EVIDENCE_POLICY)).join(' / ')}）`
+      )).join('、');
+      problems.push(issue('BLOCK', '证据不足', `当前候选提交缺少可信的 ${missing}`, '在当前候选提交上补齐可信检查，然后重跑门禁。'));
+    } else if (review.conclusion === 'BLOCK' && !review.risks.some(risk => REVIEW_POLICY.riskLevels[risk.level].blocksMerge)) {
+      problems.push(issue('BLOCK', '安全审查', review.summary, '按审查结论修复后重跑门禁。'));
+    }
+  }
+
+  if (architecture.conclusion === 'BLOCK') {
+    const violations = architecture.newViolations?.length > 0
+      ? architecture.newViolations
+      : [{ path: '架构门禁', message: architecture.summary }];
+    for (const violation of violations) {
+      problems.push(issue('BLOCK', violation.path ?? '架构门禁', violation.message, '修复该架构违规并重新运行门禁。'));
+    }
+  }
 
   return [
     'Code Review 完成',
     '<!-- pr-security-gate-report -->',
-    `仓库：${redact(context.repository ?? '未提供')}`,
-    `分支：${redact(context.branch ?? '未提供')}`,
-    `提交：${redact(context.commit ?? '未提供')}`,
-    `提交信息：${redact(context.commitMessage ?? '未提供')}`,
-    `提交者：${redact(context.author ?? '未提供')}`,
-    `Review 模式：${redact(reviewMode)}`,
-    `事件：${redact(context.eventType ?? '未提供')}`,
-    `目标 Base SHA：${redact(context.baseSha ?? '未提供')}`,
-    `PR Head SHA：${redact(context.headSha ?? '未提供')}`,
-    `候选 Merge SHA：${redact(context.mergeSha ?? '未提供')}`,
-    `队列 Parent SHA：${redact(context.queueBaseSha ?? '不适用')}`,
-    '',
-    `安全门禁：${review.conclusion}`,
-    `安全审查状态：${review.reviewStatus === 'unavailable' ? '不可用（未完成）' : '已完成'}`,
-    `架构门禁：${architecture.configured ? architecture.conclusion : '未配置（BLOCK）'}`,
     `判定结果：${finalConclusion}`,
-    `合并动作：${mergeAction}`,
-    `结论依据：安全审查：${redact(review.summary)}；架构审查：${redact(architecture.summary)}`,
+    `安全门禁：${review.conclusion}；架构门禁：${architecture.conclusion}`,
+    `提交：${brief(context.headSha ?? context.commit ?? '未提供', 12)}；候选：${brief(context.mergeSha ?? '未提供', 12)}`,
+    ...(review.reviewStatus === 'completed' && review.technicalDebtCount > 0 ? [`本 PR 技术债：${review.technicalDebtCount} 项`] : []),
     '',
-    '审查范围：',
-    `- 本次范围：${redact(context.scope ?? '未提供')}`,
-    `- 未审查范围：${redact(context.unreviewedScope ?? '未提供')}`,
-    '',
-    '审查摘要：',
-    redact(review.summary),
-    '',
-    '值得肯定：',
-    bulletList(review.positives, '无。'),
-    '',
-    '变更的敏感面：',
-    surfaceLines,
-    '',
-    '已验证证据：',
-    renderEvidenceItems(verifiedEvidence, '没有通过机器校验的证据。'),
-    '',
-    '未验证、失败或不可用证据：',
-    renderEvidenceItems(unavailableEvidence, '无。'),
-    '',
-    '未验证声明（不参与门禁）：',
-    renderEvidenceItems(claims, 'PR 正文未提供声明。'),
-    '',
-    '证据缺口：',
-    renderEvidenceGaps(review.evidenceGaps, review.reviewStatus),
-    '',
-    '需关注的问题：',
-    renderRisks(review.risks, review.reviewStatus),
-    '',
-    '架构门禁详情：',
-    `- 配置状态：${architecture.configured ? '已配置' : '未配置'}`,
-    '- 新增违规：',
-    renderArchitectureViolations(architecture.newViolations, '无新增架构违规。'),
-    '- 已有违规：',
-    renderArchitectureViolations(architecture.existingViolations, '无已知遗留架构违规。'),
-    '- 已消除违规：',
-    renderArchitectureViolations(architecture.resolvedViolations, '无。'),
-    '',
-    `本 PR 技术债：${review.reviewStatus === 'unavailable' ? '未能判定（安全审查未完成）' : `${review.technicalDebtCount} 项`}`,
-    '累计技术债：',
-    renderCumulativeDebt(architecture),
+    problems.length > 0 ? problems.join('\n\n') : '本次变更未发现需修复的风险。',
   ].join('\n');
 }
 
