@@ -44,7 +44,7 @@
     "semgrep": {
       "version": "1.179.0",
       "image": "semgrep/semgrep@sha256:510258ad1ec7aacf2933fb83fd6ce352ffa628f1e579ea90b37c3c1a1e7ce302",
-      "rulesetSha256": "f4eedf6eb1c771b5d8a5fabc179e2ffaa6b9f1b4d958177b103f6c91a661e151"
+      "rulesetSha256": "0338bd417fd148f012a94aa486eb5d57b66561d8e1885efd4454a42a3bdbcf65"
     },
     "gitleaks": {
       "version": "8.30.0",

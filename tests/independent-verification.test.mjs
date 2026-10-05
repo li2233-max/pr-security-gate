@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -79,27 +78,7 @@ test('pinned Semgrep scans files in a restrictive isolated snapshot', { skip: pr
     chmodSync(target, 0o400);
     chmodSync(directory, 0o700);
     prepareSnapshotForDocker(snapshot);
-    try {
-      assert.ok((await runSemgrep(snapshot)) >= 1);
-    } catch (error) {
-      const profile = JSON.parse(readFileSync(new URL('../profiles/weixin-ci-verification.json', import.meta.url), 'utf8'));
-      const probe = spawnSync('docker', [
-        'run', '--rm', '--network', 'none', '--read-only', '--user', '65532:65532',
-        '--mount', `type=bind,src=${snapshot},dst=/src,readonly`,
-        '--entrypoint', 'ls', profile.tools.semgrep.image, '-l', '/src/cloudbase/cloudfunctions/payCallback/safe.js',
-      ], { encoding: 'utf8', timeout: 30_000 });
-      const scan = spawnSync('docker', [
-        'run', '--rm', '--network', 'none', '--read-only', '--user', '65532:65532',
-        '--tmpfs=/tmp:rw,noexec,nosuid,size=128m', '-e', 'HOME=/tmp',
-        '--mount', `type=bind,src=${snapshot},dst=/src,readonly`,
-        '--mount', `type=bind,src=${join(process.cwd(), 'profiles', 'weixin-semgrep-rules.yml')},dst=/rules.yml,readonly`,
-        '--workdir', '/src', '--entrypoint', 'semgrep', profile.tools.semgrep.image,
-        'scan', '--config', '/rules.yml', '--json', '--verbose', '--metrics=off', '--disable-version-check', '--no-git-ignore', 'cloudbase/cloudfunctions',
-      ], { encoding: 'utf8', timeout: 30_000 });
-      const scanReport = JSON.parse(scan.stdout || '{}');
-      const scanSummary = String(scan.stderr).slice(-1_400).replace(/\r?\n/g, ' | ');
-      throw new Error(`${error.message}; isolated file probe: exit ${probe.status}, ${String(probe.stderr).slice(0, 200)}; Semgrep probe: exit ${scan.status}, scanned=${scanReport.paths?.scanned?.length}, skipped=${scanReport.paths?.skipped?.length}, skippedRules=${scanReport.skipped_rules?.length}, errors=${JSON.stringify(scanReport.errors?.map(item => item.type))}, stderr=${scanSummary}`);
-    }
+    assert.ok((await runSemgrep(snapshot)) >= 1);
   } finally {
     rmSync(snapshot, { recursive: true, force: true });
   }

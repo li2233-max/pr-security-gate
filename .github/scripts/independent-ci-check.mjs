@@ -208,7 +208,7 @@ async function withTemp(work) {
   try { return await work(temp); } finally { rmSync(temp, { recursive: true, force: true }); }
 }
 
-function dockerBase(image, candidate, { network = 'none', extraMounts = [], entrypoint, commandArgs = [], workdir } = {}) {
+function dockerBase(image, candidate, { network = 'none', extraMounts = [], entrypoint, commandArgs = [] } = {}) {
   const args = [
     'run', '--rm', '--network', network, '--read-only', '--user', '65532:65532',
     '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=128', '--memory=1g', '--cpus=2',
@@ -216,7 +216,6 @@ function dockerBase(image, candidate, { network = 'none', extraMounts = [], entr
     '--mount', `type=bind,src=${candidate},dst=/src,readonly`,
   ];
   for (const [host, container] of extraMounts) args.push('--mount', `type=bind,src=${host},dst=${container},readonly`);
-  if (workdir) args.push('--workdir', workdir);
   if (entrypoint) args.push('--entrypoint', entrypoint);
   args.push(image);
   args.push(...commandArgs);
@@ -284,8 +283,7 @@ export async function runSemgrep(snapshot) {
     ...dockerBase(profile.tools.semgrep.image, snapshot, {
       extraMounts: [[rules, '/rules.yml']],
       entrypoint: 'semgrep',
-      workdir: '/src',
-      commandArgs: ['scan', '--config', '/rules.yml', '--json', '--error', '--strict', '--metrics=off', '--disable-version-check', '--no-git-ignore', ...targets.roots],
+      commandArgs: ['scan', '--config', '/rules.yml', '--json', '--error', '--strict', '--metrics=off', '--disable-version-check', '--no-git-ignore', ...targets.roots.map(root => `/src/${root}`)],
     }),
   ]);
   let report;
