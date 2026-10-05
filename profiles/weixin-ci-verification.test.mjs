@@ -29,6 +29,11 @@ test('pins the exact valid Semgrep ruleset bytes in the verification profile', a
   assert.equal(profile.tools.semgrep.rulesetSha256, createHash('sha256').update(canonicalRules).digest('hex'));
 });
 
+test('approves only the published immutable verifier release for weixin', async () => {
+  const approved = JSON.parse(await readFile(new URL('./approved-verifiers.json', import.meta.url), 'utf8'));
+  assert.equal(approved.verifiers['weixin-v1'].sha, 'd3ca7675f63e71cee557024052a841c49ab51e97');
+});
+
 test('rejects unknown keys and unsupported schema versions', () => {
   assert.throws(() => parseVerificationProfile({ ...profile, callerOverride: true }), VerificationProfileError);
   assert.throws(() => parseVerificationProfile({ ...profile, schemaVersion: 2 }), /schemaVersion/);

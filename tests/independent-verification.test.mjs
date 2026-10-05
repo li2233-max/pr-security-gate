@@ -73,7 +73,8 @@ function zipStored(filename, content) {
 test('accepts only the pinned weixin verifier run and candidate-bound manifest', async () => {
   const profile = parseVerificationProfile(JSON.parse(await readFile(new URL('../profiles/weixin-ci-verification.json', import.meta.url), 'utf8')));
   const callerTemplate = await readFile(new URL('../templates/project-independent-ci-verification.yml', import.meta.url), 'utf8');
-  const verifierSha = '5a642e472743f4be2242b56eab6d81a98339ebba';
+  const verifierRegistry = JSON.parse(await readFile(new URL('../profiles/approved-verifiers.json', import.meta.url), 'utf8'));
+  const verifierSha = verifierRegistry.verifiers['weixin-v1'].sha;
   const baseSha = '1'.repeat(40);
   const headSha = '2'.repeat(40);
   const candidateSha = '3'.repeat(40);
