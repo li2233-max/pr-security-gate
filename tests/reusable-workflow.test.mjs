@@ -9,6 +9,14 @@ const workflowPath = new URL('../.github/workflows/pr-ai-review.yml', import.met
 const verifierWorkflowPath = new URL('../.github/workflows/independent-ci-verification.yml', import.meta.url);
 const callerTemplatePath = new URL('../templates/project-pr-ai-review.yml', import.meta.url);
 const verifierCallerTemplatePath = new URL('../templates/project-independent-ci-verification.yml', import.meta.url);
+const verifierRegistryPath = new URL('../profiles/approved-verifiers.json', import.meta.url);
+
+test('中心策略只批准已经固定的 verifier 完整 commit SHA', async () => {
+  const registry = JSON.parse(await readFile(verifierRegistryPath, 'utf8'));
+  assert.equal(registry.schemaVersion, 1);
+  assert.deepEqual(Object.keys(registry.verifiers), ['weixin-v1']);
+  assert.equal(registry.verifiers['weixin-v1'].sha, '306a57839636607e48763d0049d99275cf2d2d0a');
+});
 
 test('中心工作流可被项目仓库调用，并声明审查所需 Secret', async () => {
   assert.equal(existsSync(workflowPath), true, '缺少 .github/workflows/pr-ai-review.yml');
@@ -54,6 +62,7 @@ test('候选仓库不能通过自带 Gitleaks 配置或忽略文件修改中心�
   assert.match(runner, /['"]\.gitleaksignore['"]/);
   assert.match(runner, /'cat-file',\s*'blob'/);
   assert.doesNotMatch(runner, /'archive'/);
+  assert.match(runner, /rev-parse',\s*'--verify',\s*'HEAD'/);
 });
 
 test('PR 运行的 GitHub head SHA 与候选合并 SHA 分开校验', () => {

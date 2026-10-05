@@ -332,8 +332,9 @@ async function runCheck(temp) {
   const definition = profile.checks.find(item => item.id === checkId);
   if (!definition) fail('verification check ID is not in the fixed profile');
   const freshness = await assertCandidateFresh();
-  const runTree = safeRun('git', ['-C', candidateRoot, 'rev-parse', '--show-toplevel']);
+  const runTree = safeRun('git', ['-C', candidateRoot, 'rev-parse', '--verify', 'HEAD']);
   requireSuccess(runTree, 'candidate checkout validation');
+  if (runTree.stdout.toString('utf8').trim() !== sourceRef) fail('candidate checkout does not match the current event SHA');
   const snapshot = createSnapshot(temp);
   let count;
   if (checkId === 'secret-scan') count = await runSecretScan(snapshot);
