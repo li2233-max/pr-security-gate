@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -140,6 +140,10 @@ export function parseTreeEntries(treeOutput) {
   });
 }
 
+export function prepareSnapshotForDocker(snapshot) {
+  chmodSync(snapshot, 0o755);
+}
+
 function walkFiles(root, relative = '') {
   const directory = join(root, relative);
   const results = [];
@@ -159,6 +163,7 @@ function createSnapshot(parent) {
   requireSuccess(tree, 'candidate tree inspection');
   const entries = parseTreeEntries(tree.stdout);
   const snapshot = mkdtempSync(join(parent, 'candidate-'));
+  prepareSnapshotForDocker(snapshot);
   let totalBytes = 0;
   for (const entry of entries) {
     const blob = safeRun('git', ['-C', candidateRoot, 'cat-file', 'blob', entry.sha], { maxBuffer: MAX_SNAPSHOT_FILE_BYTES });
