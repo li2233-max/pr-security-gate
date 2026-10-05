@@ -285,7 +285,7 @@ export async function runSemgrep(snapshot) {
       extraMounts: [[rules, '/rules.yml']],
       entrypoint: 'semgrep',
       workdir: '/src',
-      commandArgs: ['scan', '--config', '/rules.yml', '--json', '--error', '--strict', '--metrics=off', '--disable-version-check', '--no-git-ignore', ...targets.roots.map(root => `/src/${root}`)],
+      commandArgs: ['scan', '--config', '/rules.yml', '--json', '--error', '--strict', '--metrics=off', '--disable-version-check', '--no-git-ignore', ...targets.roots],
     }),
   ]);
   let report;
