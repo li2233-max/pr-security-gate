@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { createWorkflowDependencies } from '../.github/scripts/pr-ai-review.mjs';
-import { summarizeProcessFailure } from '../.github/scripts/independent-ci-check.mjs';
+import { prepareSnapshotForDocker, summarizeProcessFailure } from '../.github/scripts/independent-ci-check.mjs';
 import { parseVerificationProfile } from '../profiles/verification-profile.mjs';
 
 test('isolated verifier failures expose safe diagnostics without echoing tool output', () => {
@@ -30,6 +33,16 @@ test('isolated verifier diagnostics identify common container and network failur
     stdout: Buffer.alloc(0),
     stderr: Buffer.from('read-only file system'),
   }), /read-only filesystem/);
+});
+
+test('candidate snapshots are traversable by the unprivileged Docker verifier', { skip: process.platform === 'win32' }, () => {
+  const snapshot = mkdtempSync(join(tmpdir(), 'prsg-snapshot-mode-'));
+  try {
+    prepareSnapshotForDocker(snapshot);
+    assert.equal(statSync(snapshot).mode & 0o777, 0o755);
+  } finally {
+    rmSync(snapshot, { recursive: true, force: true });
+  }
 });
 
 function zipStored(filename, content) {
