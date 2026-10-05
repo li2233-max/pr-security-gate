@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "profileId": "weixin-v1",
+  "repository": {
+    "id": 1378303598,
+    "fullName": "li2233-max/weixin"
+  },
+  "events": [
+    "pull_request",
+    "merge_group"
+  ],
+  "checks": [
+    { "id": "secret-scan", "evidenceType": "secret_scan", "minimumCount": 1 },
+    { "id": "sast-config-scan", "evidenceType": "static_analysis", "minimumCount": 1 },
+    { "id": "dependency-scan", "evidenceType": "dependency_scan", "minimumCount": 1 },
+    { "id": "payment-refund-tests", "evidenceType": "transaction_test", "minimumCount": 2 },
+    { "id": "authorization-tests", "evidenceType": "authorization_test", "minimumCount": 2 },
+    { "id": "production-hardening-tests", "evidenceType": "test", "minimumCount": 1 }
+  ],
+  "scanRoots": [
+    "cloudbase/cloudfunctions",
+    "miniprogram/pages",
+    "miniprogram/utils",
+    "miniprogram/configs",
+    "miniprogram/scripts"
+  ],
+  "tools": {
+    "semgrep": {
+      "version": "1.179.0",
+      "image": "semgrep/semgrep@sha256:510258ad1ec7aacf2933fb83fd6ce352ffa628f1e579ea90b37c3c1a1e7ce302",
+      "rulesetSha256": "de8142a48f651ce5fa226876faf5613ce8c5b5acfb86c9119f59d9fc6eb4e857"
+    },
+    "gitleaks": {
+      "version": "8.30.0",
+      "platform": "linux_x64",
+      "archiveSha256": "79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e"
+    },
+    "nodeTest": {
+      "version": "20.20.0",
+      "image": "node@sha256:7d49fead4dbde89ba791d165a904f76eec446a4c1143862f14325e6348a3486d"
+    }
+  },
+  "trustedTests": [
+    {
+      "checkId": "payment-refund-tests",
+      "sourceCommit": "c3f933fce65e2b3c0da1fcceb4efee20cfef1c0a",
+      "files": [
+        { "path": "cloudbase/tests/payment-callback-core.test.js", "sha256": "8b9a53955b035c7006a136cdaff4b29a45809e483152e16ee84597f5ee0abc70" },
+        { "path": "cloudbase/tests/refund-callback-core.test.js", "sha256": "24e75859d040509cde56917afb50d653b67c05e9bca921b439f0161e0cf319ff" }
+      ]
+    },
+    {
+      "checkId": "authorization-tests",
+      "sourceCommit": "c3f933fce65e2b3c0da1fcceb4efee20cfef1c0a",
+      "files": [
+        { "path": "cloudbase/tests/payment-test-access.test.js", "sha256": "7d634b2fbd5ed12b36cb46c0fa721f61f5d7ef7049dbffe04f2df33d4ba6f885" },
+        { "path": "miniprogram/tests/payment-access-policy.test.js", "sha256": "83b55dd7cab139408cdbfe4e928bb2efc00858567a13899576d47b314268cef6" }
+      ]
+    }
+  ]
+}
