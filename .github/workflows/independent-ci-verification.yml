@@ -1,0 +1,221 @@
+name: Independent CI Verification
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: independent-ci-${{ github.repository }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      count: ${{ steps.verify.outputs.count }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: .candidate
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .verifier
+          persist-credentials: false
+      - id: verify
+        run: node .verifier/.github/scripts/independent-ci-check.mjs
+        env:
+          CANDIDATE_PATH: .candidate
+          VERIFICATION_CHECK_ID: secret-scan
+          GITHUB_TOKEN: ${{ github.token }}
+
+  sast-config-scan:
+    name: sast-config-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      count: ${{ steps.verify.outputs.count }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: .candidate
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .verifier
+          persist-credentials: false
+      - id: verify
+        run: node .verifier/.github/scripts/independent-ci-check.mjs
+        env:
+          CANDIDATE_PATH: .candidate
+          VERIFICATION_CHECK_ID: sast-config-scan
+          GITHUB_TOKEN: ${{ github.token }}
+
+  dependency-scan:
+    name: dependency-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      count: ${{ steps.verify.outputs.count }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: .candidate
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .verifier
+          persist-credentials: false
+      - id: verify
+        run: node .verifier/.github/scripts/independent-ci-check.mjs
+        env:
+          CANDIDATE_PATH: .candidate
+          VERIFICATION_CHECK_ID: dependency-scan
+          GITHUB_TOKEN: ${{ github.token }}
+
+  payment-refund-tests:
+    name: payment-refund-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      count: ${{ steps.verify.outputs.count }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: .candidate
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .verifier
+          persist-credentials: false
+      - id: verify
+        run: node .verifier/.github/scripts/independent-ci-check.mjs
+        env:
+          CANDIDATE_PATH: .candidate
+          VERIFICATION_CHECK_ID: payment-refund-tests
+          GITHUB_TOKEN: ${{ github.token }}
+
+  authorization-tests:
+    name: authorization-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      count: ${{ steps.verify.outputs.count }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: .candidate
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .verifier
+          persist-credentials: false
+      - id: verify
+        run: node .verifier/.github/scripts/independent-ci-check.mjs
+        env:
+          CANDIDATE_PATH: .candidate
+          VERIFICATION_CHECK_ID: authorization-tests
+          GITHUB_TOKEN: ${{ github.token }}
+
+  production-hardening-tests:
+    name: production-hardening-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      count: ${{ steps.verify.outputs.count }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: .candidate
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .verifier
+          persist-credentials: false
+      - id: verify
+        run: node .verifier/.github/scripts/independent-ci-check.mjs
+        env:
+          CANDIDATE_PATH: .candidate
+          VERIFICATION_CHECK_ID: production-hardening-tests
+          GITHUB_TOKEN: ${{ github.token }}
+
+  publish-verification-manifest:
+    name: publish-verification-manifest
+    if: ${{ success() }}
+    needs:
+      - secret-scan
+      - sast-config-scan
+      - dependency-scan
+      - payment-refund-tests
+      - authorization-tests
+      - production-hardening-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .verifier
+          persist-credentials: false
+      - name: Create the run-bound verification manifest
+        run: node .verifier/.github/scripts/publish-verification-manifest.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VERIFIER_SHA: ${{ job.workflow_sha }}
+          SECRET_SCAN_COUNT: ${{ needs.secret-scan.outputs.count }}
+          SAST_CONFIG_SCAN_COUNT: ${{ needs.sast-config-scan.outputs.count }}
+          DEPENDENCY_SCAN_COUNT: ${{ needs.dependency-scan.outputs.count }}
+          PAYMENT_REFUND_TESTS_COUNT: ${{ needs.payment-refund-tests.outputs.count }}
+          AUTHORIZATION_TESTS_COUNT: ${{ needs.authorization-tests.outputs.count }}
+          PRODUCTION_HARDENING_TESTS_COUNT: ${{ needs.production-hardening-tests.outputs.count }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: independent-ci-verification-${{ github.run_attempt }}
+          path: verification.json
+          if-no-files-found: error
+          retention-days: 1
