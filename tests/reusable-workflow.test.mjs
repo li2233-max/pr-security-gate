@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { workflowRunHeadSha } from '../.github/scripts/publish-verification-manifest.mjs';
+import { parseTreeEntries } from '../.github/scripts/independent-ci-check.mjs';
 
 const workflowPath = new URL('../.github/workflows/pr-ai-review.yml', import.meta.url);
 const verifierWorkflowPath = new URL('../.github/workflows/independent-ci-verification.yml', import.meta.url);
@@ -51,6 +52,8 @@ test('候选仓库不能通过自带 Gitleaks 配置或忽略文件修改中心�
   const runner = await readFile(new URL('../.github/scripts/independent-ci-check.mjs', import.meta.url), 'utf8');
   assert.match(runner, /['"]\.gitleaks\.toml['"]/);
   assert.match(runner, /['"]\.gitleaksignore['"]/);
+  assert.match(runner, /'cat-file',\s*'blob'/);
+  assert.doesNotMatch(runner, /'archive'/);
 });
 
 test('PR 运行的 GitHub head SHA 与候选合并 SHA 分开校验', () => {
@@ -58,6 +61,18 @@ test('PR 运行的 GitHub head SHA 与候选合并 SHA 分开校验', () => {
   const mergeSha = 'b'.repeat(40);
   assert.equal(workflowRunHeadSha('pull_request', { pull_request: { head: { sha: headSha } } }, mergeSha), headSha);
   assert.equal(workflowRunHeadSha('merge_group', {}, mergeSha), mergeSha);
+});
+
+test('候选快照直接读取 Git blob，不执行 archive 属性或链接路径', () => {
+  const sha = 'a'.repeat(40);
+  assert.deepEqual(parseTreeEntries(Buffer.from(`100644 blob ${sha}\tminiprogram/app.json\0`)), [
+    { mode: '100644', sha, path: 'miniprogram/app.json' },
+  ]);
+  for (const row of [
+    `120000 blob ${sha}\tlink\0`,
+    `160000 commit ${sha}\tmodule\0`,
+    `100644 blob ${sha}\t../outside\0`,
+  ]) assert.throws(() => parseTreeEntries(Buffer.from(row)), /candidate/);
 });
 
 test('独立验证项目模板只调用固定中心工作流且没有 PR 可控步骤或 Secret', async () => {

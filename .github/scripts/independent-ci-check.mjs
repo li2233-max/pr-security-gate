@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseVerificationProfile } from '../../profiles/verification-profile.mjs';
 
 const verifierRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -14,7 +14,9 @@ const sourceRef = process.env.GITHUB_SHA;
 const repository = process.env.GITHUB_REPOSITORY;
 const apiBase = process.env.GITHUB_API_URL ?? 'https://api.github.com';
 const githubToken = process.env.GITHUB_TOKEN;
-const isWin = process.platform === 'win32';
+const MAX_SNAPSHOT_FILE_COUNT = 50_000;
+const MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024;
+const MAX_SNAPSHOT_FILE_BYTES = 64 * 1024 * 1024;
 
 function fail(message) {
   throw new Error(message);
@@ -90,12 +92,31 @@ async function assertCandidateFresh() {
   fail('event is unsupported');
 }
 
-function parseTreeModes(treeOutput) {
-  const rows = treeOutput.toString('utf8').split('\0').filter(Boolean);
-  for (const row of rows) {
-    const mode = row.slice(0, row.indexOf(' '));
-    if (mode === '120000' || mode === '160000') fail('candidate contains a symbolic link or submodule that cannot be safely isolated');
+export function parseTreeEntries(treeOutput) {
+  const rows = [];
+  let offset = 0;
+  while (offset < treeOutput.length) {
+    const end = treeOutput.indexOf(0, offset);
+    if (end < 0) fail('candidate tree output is truncated');
+    if (end > offset) rows.push(treeOutput.subarray(offset, end));
+    offset = end + 1;
   }
+  if (rows.length === 0 || rows.length > MAX_SNAPSHOT_FILE_COUNT) fail('candidate tree is empty or exceeds the file-count limit');
+  return rows.map(row => {
+    const separator = row.indexOf(0x09);
+    if (separator < 0) fail('candidate tree entry is malformed');
+    const [mode, type, sha] = row.subarray(0, separator).toString('ascii').split(' ');
+    const pathBytes = row.subarray(separator + 1);
+    const path = pathBytes.toString('utf8');
+    if (type !== 'blob' || !['100644', '100755'].includes(mode) || !/^[a-f0-9]{40}$/.test(sha ?? '')) {
+      fail('candidate contains a symbolic link, submodule or unsupported tree entry');
+    }
+    if (!path || path.includes('\\') || /[\u0000-\u001f\u007f]/.test(path) ||
+        !Buffer.from(path, 'utf8').equals(pathBytes) || path.split('/').some(part => !part || part === '.' || part === '..')) {
+      fail('candidate contains an unsafe or non-UTF-8 path');
+    }
+    return { mode, sha, path };
+  });
 }
 
 function walkFiles(root, relative = '') {
@@ -112,21 +133,28 @@ function walkFiles(root, relative = '') {
   return results;
 }
 
-function createSnapshot(parent, { includeTests = false } = {}) {
+function createSnapshot(parent) {
   const tree = safeRun('git', ['-C', candidateRoot, 'ls-tree', '-rz', '--full-tree', sourceRef]);
   requireSuccess(tree, 'candidate tree inspection');
-  parseTreeModes(tree.stdout);
-  const archive = safeRun('git', ['-C', candidateRoot, 'archive', '--format=tar', sourceRef], { maxBuffer: 256 * 1024 * 1024 });
-  requireSuccess(archive, 'candidate snapshot creation');
+  const entries = parseTreeEntries(tree.stdout);
   const snapshot = mkdtempSync(join(parent, 'candidate-'));
-  const extract = safeRun('tar', ['-xf', '-', '-C', snapshot], { input: archive.stdout });
-  requireSuccess(extract, 'candidate snapshot extraction');
+  let totalBytes = 0;
+  for (const entry of entries) {
+    const blob = safeRun('git', ['-C', candidateRoot, 'cat-file', 'blob', entry.sha], { maxBuffer: MAX_SNAPSHOT_FILE_BYTES });
+    requireSuccess(blob, 'candidate blob read');
+    totalBytes += blob.stdout.length;
+    if (blob.stdout.length > MAX_SNAPSHOT_FILE_BYTES || totalBytes > MAX_SNAPSHOT_BYTES) fail('candidate snapshot exceeds the byte-size limit');
+    const destination = resolve(snapshot, ...entry.path.split('/'));
+    const relativePath = destination.slice(snapshot.length + 1);
+    if (!relativePath || relativePath.startsWith(`..${sep}`) || relativePath === '..') fail('candidate path escaped the isolated snapshot');
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(destination, blob.stdout, { mode: entry.mode === '100755' ? 0o555 : 0o444, flag: 'wx' });
+  }
   for (const file of walkFiles(snapshot)) {
     if (['.gitignore', '.semgrepignore', '.gitleaksignore', '.gitleaks.toml', '.npmrc'].includes(file.split('/').at(-1))) {
       rmSync(join(snapshot, ...file.split('/')), { force: true });
     }
   }
-  if (!includeTests) return snapshot;
   return snapshot;
 }
 
@@ -319,8 +347,14 @@ async function runCheck(temp) {
   writeFileSync(process.env.GITHUB_OUTPUT, `count=${count}\nsummary=${definition.id} passed on ${freshness.candidateSha}\n`, { flag: 'a' });
 }
 
-await withTemp(temp => runCheck(temp).catch(error => {
-  // Never echo candidate-controlled scanner/test output into the runner command channel.
-  console.error(String(error?.message ?? 'independent verification failed').replace(/[\r\n]/g, ' ').slice(0, 300));
-  process.exitCode = 1;
-}));
+async function main() {
+  await withTemp(temp => runCheck(temp));
+}
+
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  main().catch(error => {
+    // Never echo candidate-controlled scanner/test output into the runner command channel.
+    console.error(String(error?.message ?? 'independent verification failed').replace(/[\r\n]/g, ' ').slice(0, 300));
+    process.exitCode = 1;
+  });
+}
