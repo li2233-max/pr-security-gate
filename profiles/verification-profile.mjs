@@ -66,13 +66,16 @@ export function parseVerificationProfile(raw) {
   if (!Array.isArray(raw.checks)) fail('checks must be an array');
   const seenChecks = new Set();
   for (const [index, check] of raw.checks.entries()) {
-    object(check, `checks[${index}]`, ['id', 'evidenceType', 'minimumCount']);
+    object(check, `checks[${index}]`, ['id', 'evidenceType', 'minimumCount', 'evidencePaths']);
     text(check.id, `checks[${index}].id`);
     if (!Object.hasOwn(CHECK_EVIDENCE, check.id)) fail(`unknown check ${check.id}`);
     if (seenChecks.has(check.id)) fail(`duplicate check ${check.id}`);
     seenChecks.add(check.id);
     if (check.evidenceType !== CHECK_EVIDENCE[check.id]) fail(`checks[${index}].evidenceType does not match the fixed mapping`);
     if (!Number.isSafeInteger(check.minimumCount) || check.minimumCount < 1) fail(`checks[${index}].minimumCount must be a positive integer`);
+    if (!Array.isArray(check.evidencePaths)) fail(`checks[${index}].evidencePaths must be an array`);
+    if (check.evidencePaths.length > 0 && !['payment-refund-tests', 'authorization-tests'].includes(check.id)) fail(`checks[${index}].evidencePaths is not allowed for this check`);
+    for (const [pathIndex, pathValue] of check.evidencePaths.entries()) path(pathValue, `checks[${index}].evidencePaths[${pathIndex}]`);
   }
   if (seenChecks.size !== Object.keys(CHECK_EVIDENCE).length || Object.keys(CHECK_EVIDENCE).some(id => !seenChecks.has(id))) {
     fail('required checks are missing');
@@ -115,4 +118,11 @@ export function parseVerificationProfile(raw) {
 
   const profileDigest = createHash('sha256').update(JSON.stringify(raw)).digest('hex');
   return Object.freeze({ ...raw, profileDigest });
+}
+
+export function evidenceTypeForCheck(check, changedPaths) {
+  if (!Array.isArray(check?.evidencePaths) || check.evidencePaths.length === 0) return check?.evidenceType;
+  return Array.isArray(changedPaths) && changedPaths.some(pathValue => check.evidencePaths.includes(pathValue))
+    ? check.evidenceType
+    : 'test';
 }

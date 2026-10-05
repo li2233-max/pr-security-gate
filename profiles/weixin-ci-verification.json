@@ -10,12 +10,28 @@
     "merge_group"
   ],
   "checks": [
-    { "id": "secret-scan", "evidenceType": "secret_scan", "minimumCount": 1 },
-    { "id": "sast-config-scan", "evidenceType": "static_analysis", "minimumCount": 1 },
-    { "id": "dependency-scan", "evidenceType": "dependency_scan", "minimumCount": 1 },
-    { "id": "payment-refund-tests", "evidenceType": "transaction_test", "minimumCount": 2 },
-    { "id": "authorization-tests", "evidenceType": "authorization_test", "minimumCount": 2 },
-    { "id": "production-hardening-tests", "evidenceType": "test", "minimumCount": 1 }
+    { "id": "secret-scan", "evidenceType": "secret_scan", "minimumCount": 1, "evidencePaths": [] },
+    { "id": "sast-config-scan", "evidenceType": "static_analysis", "minimumCount": 1, "evidencePaths": [] },
+    { "id": "dependency-scan", "evidenceType": "dependency_scan", "minimumCount": 1, "evidencePaths": [] },
+    {
+      "id": "payment-refund-tests",
+      "evidenceType": "transaction_test",
+      "minimumCount": 2,
+      "evidencePaths": [
+        "cloudbase/cloudfunctions/payCallback/payment-callback-core.js",
+        "cloudbase/cloudfunctions/refundCallback/refund-callback-core.js"
+      ]
+    },
+    {
+      "id": "authorization-tests",
+      "evidenceType": "authorization_test",
+      "minimumCount": 2,
+      "evidencePaths": [
+        "cloudbase/cloudfunctions/createOrder/payment-test-access.js",
+        "miniprogram/configs/runtime.js"
+      ]
+    },
+    { "id": "production-hardening-tests", "evidenceType": "test", "minimumCount": 1, "evidencePaths": [] }
   ],
   "scanRoots": [
     "cloudbase/cloudfunctions",

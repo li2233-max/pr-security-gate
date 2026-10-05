@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { parseVerificationProfile, VerificationProfileError } from './verification-profile.mjs';
+import { evidenceTypeForCheck, parseVerificationProfile, VerificationProfileError } from './verification-profile.mjs';
 
 const profilePath = fileURLToPath(new URL('./weixin-ci-verification.json', import.meta.url));
 const profile = JSON.parse(await readFile(profilePath, 'utf8'));
@@ -30,7 +30,7 @@ test('rejects unknown keys and unsupported schema versions', () => {
 test('rejects an incomplete or duplicate required check inventory', () => {
   assert.throws(() => parseVerificationProfile({ ...profile, checks: profile.checks.slice(1) }), /required checks/);
   assert.throws(() => parseVerificationProfile({ ...profile, checks: [...profile.checks, profile.checks[0]] }), /duplicate/);
-  assert.throws(() => parseVerificationProfile({ ...profile, checks: [...profile.checks, { id: 'made-up-check', evidenceType: 'authorization', minimumCount: 1 }] }), /unknown check/);
+  assert.throws(() => parseVerificationProfile({ ...profile, checks: [...profile.checks, { id: 'made-up-check', evidenceType: 'authorization_test', minimumCount: 1, evidencePaths: [] }] }), /unknown check/);
 });
 
 test('rejects unpinned tool and ruleset references', () => {
@@ -58,4 +58,13 @@ test('requires immutable private test source and per-file digests', () => {
   const missingDigest = structuredClone(profile);
   delete missingDigest.trustedTests[0].files[0].sha256;
   assert.throws(() => parseVerificationProfile(missingDigest), /missing sha256/);
+});
+
+test('maps trusted business tests only to the exact code paths covered by their pinned test sources', () => {
+  const authorization = profile.checks.find(check => check.id === 'authorization-tests');
+  const payment = profile.checks.find(check => check.id === 'payment-refund-tests');
+  assert.equal(evidenceTypeForCheck(authorization, ['cloudbase/cloudfunctions/manageStaff/index.js']), 'test');
+  assert.equal(evidenceTypeForCheck(authorization, ['cloudbase/cloudfunctions/createOrder/payment-test-access.js']), 'authorization_test');
+  assert.equal(evidenceTypeForCheck(payment, ['cloudbase/cloudfunctions/manageStaff/index.js']), 'test');
+  assert.equal(evidenceTypeForCheck(payment, ['cloudbase/cloudfunctions/refundCallback/refund-callback-core.js']), 'transaction_test');
 });
