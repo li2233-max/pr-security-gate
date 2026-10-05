@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createWorkflowDependencies } from '../.github/scripts/pr-ai-review.mjs';
-import { prepareSnapshotForDocker, summarizeProcessFailure } from '../.github/scripts/independent-ci-check.mjs';
+import { installTrustedTests, prepareSnapshotForDocker, runSemgrep, summarizeProcessFailure } from '../.github/scripts/independent-ci-check.mjs';
 import { parseVerificationProfile } from '../profiles/verification-profile.mjs';
 
 test('isolated verifier failures expose safe diagnostics without echoing tool output', () => {
@@ -46,7 +46,42 @@ test('candidate snapshots are traversable by the unprivileged Docker verifier', 
     assert.equal(statSync(snapshot).mode & 0o777, 0o755);
     assert.equal(statSync(join(snapshot, '.github')).mode & 0o777, 0o755);
     assert.equal(statSync(nested).mode & 0o777, 0o755);
-    assert.equal(statSync(join(nested, 'quality.yml')).mode & 0o777, 0o400);
+    assert.equal(statSync(join(nested, 'quality.yml')).mode & 0o777, 0o444);
+  } finally {
+    rmSync(snapshot, { recursive: true, force: true });
+  }
+});
+
+test('trusted test bytes replace a read-only candidate test copy', { skip: process.platform === 'win32' }, () => {
+  const snapshot = mkdtempSync(join(tmpdir(), 'prsg-trusted-test-'));
+  const path = 'cloudbase/tests/payment-callback-core.test.js';
+  const target = join(snapshot, ...path.split('/'));
+  try {
+    mkdirSync(join(snapshot, 'cloudbase', 'tests'), { recursive: true });
+    writeFileSync(target, 'candidate-controlled test', { mode: 0o444 });
+    chmodSync(target, 0o444);
+    installTrustedTests(snapshot, [{ path, bytes: Buffer.from('centrally approved test') }]);
+    assert.equal(readFileSync(target, 'utf8'), 'centrally approved test');
+    assert.equal(statSync(target).mode & 0o777, 0o444);
+  } finally {
+    rmSync(snapshot, { recursive: true, force: true });
+  }
+});
+
+test('pinned Semgrep scans files in a restrictive isolated snapshot', { skip: process.env.GITHUB_ACTIONS !== 'true' }, async () => {
+  const snapshot = mkdtempSync(join(tmpdir(), 'prsg-semgrep-snapshot-'));
+  const directory = join(snapshot, 'cloudbase', 'cloudfunctions', 'payCallback');
+  try {
+    mkdirSync(directory, { recursive: true });
+    const target = join(directory, 'safe.js');
+    writeFileSync(target, 'const safe = true;\n', { mode: 0o400 });
+    chmodSync(target, 0o400);
+    chmodSync(directory, 0o700);
+    prepareSnapshotForDocker(snapshot);
+    assert.ok((await runSemgrep(snapshot)) >= 1);
+    writeFileSync(join(directory, 'unsafe.js'), 'crypto.createDecipheriv("aes-256-gcm", key, iv);\n');
+    prepareSnapshotForDocker(snapshot);
+    await assert.rejects(runSemgrep(snapshot), /Semgrep found 1 security finding/);
   } finally {
     rmSync(snapshot, { recursive: true, force: true });
   }

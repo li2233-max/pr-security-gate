@@ -8,10 +8,6 @@ rules:
       - metavariable-regex:
           metavariable: $ALG
           regex: "[\\\"']aes-(128|192|256)-gcm[\\\"']"
-    paths:
-      include:
-        - cloudbase/cloudfunctions/**/*.js
-        - cloudbase/cloudfunctions/**/*.cjs
   - id: weixin-node-child-process-shell
     languages: [javascript, typescript]
     message: Avoid shell-enabled child process execution with request-derived values.
@@ -27,7 +23,3 @@ rules:
             - metavariable-regex:
                 metavariable: $INPUT
                 regex: .*(req|request|event|query|body|params).*
-    paths:
-      include:
-        - cloudbase/cloudfunctions/**/*.js
-        - cloudbase/cloudfunctions/**/*.cjs

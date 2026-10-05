@@ -148,6 +148,7 @@ export function prepareSnapshotForDocker(snapshot) {
       const stat = lstatSync(child);
       if (stat.isSymbolicLink()) fail('candidate snapshot contains a symbolic link');
       if (stat.isDirectory()) makeDirectoriesTraversable(child);
+      else if (stat.isFile()) chmodSync(child, stat.mode & 0o111 ? 0o555 : 0o444);
     }
   };
   makeDirectoriesTraversable(snapshot);
@@ -273,7 +274,7 @@ async function runSecretScan(snapshot) {
   }
 }
 
-async function runSemgrep(snapshot) {
+export async function runSemgrep(snapshot) {
   const targets = scanTargets(snapshot);
   const rules = join(verifierRoot, 'profiles/weixin-semgrep-rules.yml');
   const rulesDigest = createHash('sha256').update(readFileSync(rules)).digest('hex');
@@ -302,7 +303,11 @@ async function runSemgrep(snapshot) {
     if (errorKinds.length) fail(`Semgrep scanner reported ${errorKinds.join(', ')}`);
     fail(summarizeProcessFailure('Semgrep scan', result));
   }
-  if (!Number.isSafeInteger(report?.results?.length) || !report?.paths?.scanned?.length) fail('Semgrep report is empty or malformed');
+  if (!Array.isArray(report?.results)) fail('Semgrep report has no results list');
+  if (!Array.isArray(report?.paths?.scanned) || report.paths.scanned.length === 0) {
+    const skipped = Array.isArray(report?.paths?.skipped) ? report.paths.skipped.length : 0;
+    fail(`Semgrep scanned 0 files from ${targets.count} approved targets (${skipped} skipped)`);
+  }
   if (report.results.length) fail('Semgrep found one or more security issues');
   return report.paths.scanned.length;
 }
@@ -350,18 +355,21 @@ async function trustedTestFiles(check) {
   return result;
 }
 
-function installTrustedTests(snapshot, files) {
+export function installTrustedTests(snapshot, files) {
   for (const file of files) {
     const target = resolve(snapshot, ...file.path.split('/'));
     const relative = target.slice(snapshot.length + 1);
     if (relative.startsWith(`..${sep}`) || relative === '..') fail('approved test path escaped the sandbox source');
     mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, file.bytes, { mode: 0o444, flag: 'w' });
+    rmSync(target, { force: true });
+    writeFileSync(target, file.bytes, { mode: 0o444, flag: 'wx' });
+    chmodSync(target, 0o444);
   }
 }
 
 async function runTrustedTests(snapshot, files) {
   installTrustedTests(snapshot, files);
+  prepareSnapshotForDocker(snapshot);
   const result = safeRun('docker', [
     ...dockerBase(profile.tools.nodeTest.image, snapshot, {
       entrypoint: 'node',
