@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,8 +38,15 @@ test('isolated verifier diagnostics identify common container and network failur
 test('candidate snapshots are traversable by the unprivileged Docker verifier', { skip: process.platform === 'win32' }, () => {
   const snapshot = mkdtempSync(join(tmpdir(), 'prsg-snapshot-mode-'));
   try {
+    const nested = join(snapshot, '.github', 'workflows');
+    mkdirSync(nested, { recursive: true, mode: 0o700 });
+    writeFileSync(join(nested, 'quality.yml'), 'name: quality', { mode: 0o400 });
+    chmodSync(join(snapshot, '.github'), 0o700);
     prepareSnapshotForDocker(snapshot);
     assert.equal(statSync(snapshot).mode & 0o777, 0o755);
+    assert.equal(statSync(join(snapshot, '.github')).mode & 0o777, 0o755);
+    assert.equal(statSync(nested).mode & 0o777, 0o755);
+    assert.equal(statSync(join(nested, 'quality.yml')).mode & 0o777, 0o400);
   } finally {
     rmSync(snapshot, { recursive: true, force: true });
   }
