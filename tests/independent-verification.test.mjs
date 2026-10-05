@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -79,35 +78,10 @@ test('pinned Semgrep scans files in a restrictive isolated snapshot', { skip: pr
     chmodSync(target, 0o400);
     chmodSync(directory, 0o700);
     prepareSnapshotForDocker(snapshot);
-    try {
-      assert.ok((await runSemgrep(snapshot)) >= 1);
-    } catch (error) {
-      const profile = JSON.parse(readFileSync(new URL('../profiles/weixin-ci-verification.json', import.meta.url), 'utf8'));
-      const patterns = [
-        ['none', ''],
-        ['all', "    paths:\n      include:\n        - '**/*.js'\n"],
-        ['relative', "    paths:\n      include:\n        - 'cloudbase/cloudfunctions/**/*.js'\n"],
-        ['unanchored', "    paths:\n      include:\n        - '**/cloudbase/cloudfunctions/**/*.js'\n"],
-        ['absolute', "    paths:\n      include:\n        - '/src/cloudbase/cloudfunctions/**/*.js'\n"],
-      ];
-      const observations = [];
-      for (const [name, pathRule] of patterns) {
-        const config = `probe-${name}.yml`;
-        writeFileSync(join(snapshot, config), `rules:\n  - id: probe-${name}\n    languages: [javascript]\n    message: controlled probe\n    severity: ERROR\n    pattern: 'const $X = $Y'\n${pathRule}`);
-        prepareSnapshotForDocker(snapshot);
-        const scan = spawnSync('docker', [
-          'run', '--rm', '--network', 'none', '--read-only', '--user', '65532:65532',
-          '--tmpfs=/tmp:rw,noexec,nosuid,size=128m', '-e', 'HOME=/tmp',
-          '--mount', `type=bind,src=${snapshot},dst=/src,readonly`,
-          '--entrypoint', 'semgrep', profile.tools.semgrep.image,
-          'scan', '--config', `/src/${config}`, '--json', '--error', '--strict', '--metrics=off', '--disable-version-check', '--no-git-ignore', '/src/cloudbase/cloudfunctions',
-        ], { encoding: 'utf8', timeout: 30_000 });
-        let report = {};
-        try { report = JSON.parse(scan.stdout); } catch {}
-        observations.push(`${name}: exit=${scan.status}, scanned=${report.paths?.scanned?.length}, findings=${report.results?.length}, errors=${report.errors?.length}`);
-      }
-      throw new Error(`${error.message}; controlled rule probes: ${observations.join('; ')}`);
-    }
+    assert.ok((await runSemgrep(snapshot)) >= 1);
+    writeFileSync(join(directory, 'unsafe.js'), 'crypto.createDecipheriv("aes-256-gcm", key, iv);\n');
+    prepareSnapshotForDocker(snapshot);
+    await assert.rejects(runSemgrep(snapshot), /Semgrep found 1 security finding/);
   } finally {
     rmSync(snapshot, { recursive: true, force: true });
   }
