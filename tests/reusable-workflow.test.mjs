@@ -9,13 +9,14 @@ const workflowPath = new URL('../.github/workflows/pr-ai-review.yml', import.met
 const verifierWorkflowPath = new URL('../.github/workflows/independent-ci-verification.yml', import.meta.url);
 const callerTemplatePath = new URL('../templates/project-pr-ai-review.yml', import.meta.url);
 const verifierCallerTemplatePath = new URL('../templates/project-independent-ci-verification.yml', import.meta.url);
-const verifierRegistryPath = new URL('../profiles/approved-verifiers.json', import.meta.url);
+const testWorkflowPath = new URL('../.github/workflows/test.yml', import.meta.url);
 
-test('中心策略只批准已经固定的 verifier 完整 commit SHA', async () => {
-  const registry = JSON.parse(await readFile(verifierRegistryPath, 'utf8'));
-  assert.equal(registry.schemaVersion, 1);
-  assert.deepEqual(Object.keys(registry.verifiers), ['weixin-v1']);
-  assert.equal(registry.verifiers['weixin-v1'].sha, '306a57839636607e48763d0049d99275cf2d2d0a');
+test('中心单元测试工作流遵循仓库 Actions allowlist，不调用外部 action', async () => {
+  const yaml = await readFile(testWorkflowPath, 'utf8');
+  assert.doesNotMatch(yaml, /^\s+uses:/m);
+  assert.match(yaml, /git fetch --no-tags --depth=1 origin/);
+  assert.match(yaml, /node --version/);
+  assert.match(yaml, /npm test/);
 });
 
 test('中心工作流可被项目仓库调用，并声明审查所需 Secret', async () => {
