@@ -4,6 +4,8 @@
 
 ## 标准入口
 
+当 PR 需要修改项目自己的 CI 工作流时，额外的可信验证入口与威胁模型见 [Independent CI verifier](independent-ci-verifier.md)。普通 Actions 检查仍按现有规则处理，不会因为同名或重跑而自动变可信。
+
 把 [项目入口模板](../templates/project-pr-ai-review.yml) 复制为目标项目的 `.github/workflows/pr-ai-review.yml`。它引用：
 
 ```text

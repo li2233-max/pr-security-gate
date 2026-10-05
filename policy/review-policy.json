@@ -62,7 +62,7 @@
       },
       "github_check": {
         "verified": true,
-        "allowedStatuses": ["passed", "failed", "pending", "neutral", "skipped"],
+        "allowedStatuses": ["passed", "failed", "pending", "neutral", "skipped", "unavailable"],
         "allowedTypes": ["ci_check", "test", "authorization_test", "http_exchange", "transaction_test", "secret_scan", "static_analysis", "dependency_scan", "image_scan", "iac_scan", "architecture_analysis"]
       },
       "commit_status": {
@@ -90,7 +90,7 @@
         "(^|/)codeql-config\\.ya?ml$"
       ]
     },
-    "trustedCheckProducers": ["github-actions-base-workflow", "github-advanced-security"],
+    "trustedCheckProducers": ["github-actions-base-workflow", "github-actions-independent-verifier", "github-advanced-security"],
     "excludedCheckNames": ["pr-security-gate"],
     "checkClassifiers": [
       {
