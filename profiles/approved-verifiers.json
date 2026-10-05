@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "verifiers": {
+    "weixin-v1": {
+      "sha": "5a642e472743f4be2242b56eab6d81a98339ebba"
+    }
+  }
+}

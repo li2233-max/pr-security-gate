@@ -4,6 +4,6 @@
   "version": "4.0.0",
   "type": "module",
   "scripts": {
-    "test": "node --test .github/scripts/architecture-gate.test.mjs .github/scripts/pr-ai-review.test.mjs tests/reusable-workflow.test.mjs policy-files.test.mjs profiles/weixin-ci-verification.test.mjs"
+    "test": "node --test .github/scripts/architecture-gate.test.mjs .github/scripts/ci-verification.test.mjs .github/scripts/pr-ai-review.test.mjs tests/independent-verification.test.mjs tests/reusable-workflow.test.mjs policy-files.test.mjs profiles/weixin-ci-verification.test.mjs"
   }
 }

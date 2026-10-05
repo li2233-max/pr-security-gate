@@ -1,5 +1,7 @@
 # PR 安全与架构审查门禁
 
+CI 配置变更的固定版本独立验证流程见 [Independent CI verifier](docs/independent-ci-verifier.md)。
+
 这是一个可复用的 GitHub Actions 中心仓库。v4 在固定 SHA 上审查安全风险，并用目标仓库 base 分支的架构契约比较候选合并态、累计技术债和必需检查。
 
 主流程固定为：审查实际 diff → 检查合并后的候选仓库 → 按受保护 base 的架构契约判定 → 比较 base/candidate 累计技术债 → 复核 SHA 是否仍有效 → 输出 `PASS/BLOCK`。PR 描述、Checks 和扫描结果只为安全审查提供辅助证据，不能替代合并态、架构契约或债务账本。
