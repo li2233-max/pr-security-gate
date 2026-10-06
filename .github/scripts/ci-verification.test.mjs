@@ -124,7 +124,7 @@ function zipFor(name, content) {
 
 test('accepts an exhaustive manifest bound to current PR and run tuple', () => {
   const validated = validateVerificationManifest(manifestFor(), expected);
-  assert.equal(validated.length, profile.checks.length);
+  assert.deepEqual(validated.map(item => item.id), ['secret-scan', 'dependency-scan', 'production-hardening-tests']);
   assert.ok(validated.every(item => item.status === 'passed'));
 });
 
@@ -144,6 +144,7 @@ test('rejects missing, duplicate, unknown, failed, skipped, under-count and forg
   assert.throws(() => validateVerificationManifest({ ...good, checks: good.checks.slice(1) }, expected), /check inventory/);
   assert.throws(() => validateVerificationManifest({ ...good, checks: [...good.checks, good.checks[0]] }, expected), /duplicate/);
   assert.throws(() => validateVerificationManifest({ ...good, checks: [...good.checks.slice(1), { ...good.checks[0], id: 'other' }] }, expected), /unknown check/);
+  assert.throws(() => validateVerificationManifest({ ...good, checks: [...good.checks, { id: 'payment-refund-tests', status: 'passed', count: 1, summary: 'passed' }] }, expected), /unknown check/);
   for (const status of ['failed', 'skipped', 'neutral']) {
     assert.throws(() => validateVerificationManifest({ ...good, checks: good.checks.map((item, index) => index ? item : { ...item, status }) }, expected), /must pass/);
   }
@@ -194,6 +195,7 @@ test('rejects duplicate, unknown, missing, skipped or failed GitHub jobs', () =>
   assert.throws(() => verifyCentralWorkflowRun(valid.run, valid.jobs.slice(1), valid.checkRuns, manifestFor(), args), /job inventory/);
   assert.throws(() => verifyCentralWorkflowRun(valid.run, [...valid.jobs, valid.jobs[0]], valid.checkRuns, manifestFor(), args), /duplicate job/);
   assert.throws(() => verifyCentralWorkflowRun(valid.run, [...valid.jobs.slice(1), { name: 'made-up', status: 'completed', conclusion: 'success' }], valid.checkRuns, manifestFor(), args), /unknown job/);
+  assert.throws(() => verifyCentralWorkflowRun(valid.run, [...valid.jobs, { ...valid.jobs[0], name: 'authorization-tests' }], valid.checkRuns, manifestFor(), args), /unknown job/);
   assert.throws(() => verifyCentralWorkflowRun(valid.run, valid.jobs.map((job, index) => index ? job : { ...job, conclusion: 'skipped' }), valid.checkRuns, manifestFor(), args), /job.*success/i);
   assert.throws(() => verifyCentralWorkflowRun(valid.run, valid.jobs.slice(0, -1), valid.checkRuns, manifestFor(), args), /job inventory/);
 });

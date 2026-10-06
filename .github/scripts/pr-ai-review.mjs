@@ -2,7 +2,7 @@ import { readFile, appendFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { evidenceTypeForCheck, parseVerificationProfile } from '../../profiles/verification-profile.mjs';
+import { parseVerificationProfile } from '../../profiles/verification-profile.mjs';
 import { parseVerificationArtifact, verifyCentralWorkflowRun } from './ci-verification.mjs';
 import {
   collectRelevantPaths,
@@ -990,7 +990,7 @@ export function createWorkflowDependencies({
           const checkRun = checkRunsByName.get(result.id);
           const checkDefinition = CENTRAL_VERIFIER_PROFILE.checks.find(check => check.id === result.id);
           return {
-            type: evidenceTypeForCheck(checkDefinition, reportContext.changedFiles),
+            type: checkDefinition.evidenceType,
             source: 'github_check',
             status: 'passed',
             sha: ref,

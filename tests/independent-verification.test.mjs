@@ -1,22 +1,23 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createWorkflowDependencies } from '../.github/scripts/pr-ai-review.mjs';
-import { installTrustedTests, prepareSnapshotForDocker, runSemgrep, summarizeProcessFailure } from '../.github/scripts/independent-ci-check.mjs';
+import { prepareSnapshotForDocker, summarizeProcessFailure } from '../.github/scripts/independent-ci-check.mjs';
 import { parseVerificationProfile } from '../profiles/verification-profile.mjs';
 
-test('isolated verifier failures expose safe diagnostics without echoing tool output', () => {
-  const summary = summarizeProcessFailure('trusted tests', {
+test('isolated verifier failures expose process codes without removed test-case details or secrets', () => {
+  const summary = summarizeProcessFailure('dependency audit', {
     status: 1,
     signal: null,
-    stdout: Buffer.from('not ok 1 - payment callback rejects invalid resource\n# Subtest: harmless test\n'),
+    stdout: Buffer.from('not ok 1 - removed test case\nEACCES private-key-material-for-tests\n'),
     stderr: Buffer.from('Error: private-key-material-for-tests'),
   });
-  assert.match(summary, /trusted tests failed with exit code 1/);
-  assert.match(summary, /payment callback rejects invalid resource/);
+  assert.match(summary, /dependency audit failed with exit code 1/);
+  assert.match(summary, /EACCES/);
+  assert.doesNotMatch(summary, /removed test case|failed test cases/);
   assert.doesNotMatch(summary, /private-key-material-for-tests/);
 });
 
@@ -27,7 +28,7 @@ test('isolated verifier diagnostics identify common container and network failur
     stdout: Buffer.alloc(0),
     stderr: Buffer.from('getaddrinfo EAI_AGAIN registry.npmjs.org'),
   }), /EAI_AGAIN/);
-  assert.match(summarizeProcessFailure('trusted tests', {
+  assert.match(summarizeProcessFailure('dependency audit', {
     status: 1,
     signal: null,
     stdout: Buffer.alloc(0),
@@ -47,41 +48,6 @@ test('candidate snapshots are traversable by the unprivileged Docker verifier', 
     assert.equal(statSync(join(snapshot, '.github')).mode & 0o777, 0o755);
     assert.equal(statSync(nested).mode & 0o777, 0o755);
     assert.equal(statSync(join(nested, 'quality.yml')).mode & 0o777, 0o444);
-  } finally {
-    rmSync(snapshot, { recursive: true, force: true });
-  }
-});
-
-test('trusted test bytes replace a read-only candidate test copy', { skip: process.platform === 'win32' }, () => {
-  const snapshot = mkdtempSync(join(tmpdir(), 'prsg-trusted-test-'));
-  const path = 'cloudbase/tests/payment-callback-core.test.js';
-  const target = join(snapshot, ...path.split('/'));
-  try {
-    mkdirSync(join(snapshot, 'cloudbase', 'tests'), { recursive: true });
-    writeFileSync(target, 'candidate-controlled test', { mode: 0o444 });
-    chmodSync(target, 0o444);
-    installTrustedTests(snapshot, [{ path, bytes: Buffer.from('centrally approved test') }]);
-    assert.equal(readFileSync(target, 'utf8'), 'centrally approved test');
-    assert.equal(statSync(target).mode & 0o777, 0o444);
-  } finally {
-    rmSync(snapshot, { recursive: true, force: true });
-  }
-});
-
-test('pinned Semgrep scans files in a restrictive isolated snapshot', { skip: process.env.GITHUB_ACTIONS !== 'true' }, async () => {
-  const snapshot = mkdtempSync(join(tmpdir(), 'prsg-semgrep-snapshot-'));
-  const directory = join(snapshot, 'cloudbase', 'cloudfunctions', 'payCallback');
-  try {
-    mkdirSync(directory, { recursive: true });
-    const target = join(directory, 'safe.js');
-    writeFileSync(target, 'const safe = true;\n', { mode: 0o400 });
-    chmodSync(target, 0o400);
-    chmodSync(directory, 0o700);
-    prepareSnapshotForDocker(snapshot);
-    assert.ok((await runSemgrep(snapshot)) >= 1);
-    writeFileSync(join(directory, 'unsafe.js'), 'crypto.createDecipheriv("aes-256-gcm", key, iv);\n');
-    prepareSnapshotForDocker(snapshot);
-    await assert.rejects(runSemgrep(snapshot), /Semgrep found 1 security finding/);
   } finally {
     rmSync(snapshot, { recursive: true, force: true });
   }
@@ -217,8 +183,9 @@ test('accepts only the pinned weixin verifier run and candidate-bound manifest',
   const verified = evidence.filter(item => item.producer === 'github-actions-independent-verifier');
   assert.equal(verified.length, profile.checks.length);
   assert.ok(verified.every(item => item.status === 'passed' && item.sha === candidateSha), JSON.stringify(verified));
-  assert.equal(verified.find(item => item.name === 'authorization-tests').type, 'test');
-  assert.equal(verified.find(item => item.name === 'payment-refund-tests').type, 'test');
+  assert.deepEqual(verified.map(item => item.name).sort(), ['dependency-scan', 'production-hardening-tests', 'secret-scan']);
+  assert.equal(verified.find(item => item.name === 'dependency-scan').type, 'dependency_scan');
+  assert.equal(verified.find(item => item.name === 'secret-scan').type, 'secret_scan');
 
   artifactExpired = true;
   const expiredEvidence = (await dependencies.getEvidence()).filter(item => item.producer === 'github-actions-independent-verifier');

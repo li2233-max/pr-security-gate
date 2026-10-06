@@ -45,8 +45,11 @@ test('独立验证工作流只提供固定 workflow_call 入口和固定检查 j
   assert.match(yaml, /^on:\s*\n\s+workflow_call:\s*$/m);
   assert.doesNotMatch(yaml, /^\s+(?:inputs|secrets):/m);
   assert.match(yaml, /^permissions:\s*\n\s+contents:\s*read\s*\n\s+pull-requests:\s*read\s*$/m);
-  for (const check of ['secret-scan', 'sast-config-scan', 'dependency-scan', 'payment-refund-tests', 'authorization-tests', 'production-hardening-tests', 'publish-verification-manifest']) {
+  for (const check of ['secret-scan', 'dependency-scan', 'production-hardening-tests', 'publish-verification-manifest']) {
     assert.match(yaml, new RegExp(`^  ${check}:$`, 'm'));
+  }
+  for (const check of ['sast-config-scan', 'payment-refund-tests', 'authorization-tests']) {
+    assert.doesNotMatch(yaml, new RegExp(`^  ${check}:$`, 'm'));
   }
   const actionRefs = [...yaml.matchAll(/^\s+-\s+uses:\s*([^\s]+)$/gm)].map(([, value]) => value);
   assert.ok(actionRefs.length >= 2);
