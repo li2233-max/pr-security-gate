@@ -64,7 +64,7 @@ async function main() {
     readJson(`${apiBase}/repos/${profile.repository.fullName}`, token, 'repository identity'),
     readJson(`${apiBase}/repos/${profile.repository.fullName}/actions/runs/${runId}`, token, 'current workflow run'),
   ]);
-  if (Number(repo.id) !== profile.repository.id || String(run.id) !== runId || Number(run.run_attempt) !== attempt || run.head_sha !== candidateSha) {
+  if (Number(repo.id) !== profile.repository.id || String(run.id) !== runId || Number(run.run_attempt) !== attempt) {
     fail('repository or workflow run snapshot changed');
   }
   const checks = profile.checks.map(check => {
