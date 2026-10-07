@@ -262,10 +262,6 @@ function finalGateConclusion(review, architecture) {
 }
 
 export function renderReport(context, review, architecture = defaultArchitectureResult()) {
-  const surfaceLines = SURFACE_NAMES.map(name => {
-    const surface = review.sensitiveSurfaces[name];
-    return `- ${name}：${surface.status}；${redact(surface.reason)}`;
-  }).join('\n');
   const finalConclusion = finalGateConclusion(review, architecture);
   const mergeAction = finalConclusion === 'BLOCK' ? '禁止合并' : '可合并';
   const reviewMode = context.reviewMode ?? '未提供';
@@ -301,9 +297,6 @@ export function renderReport(context, review, architecture = defaultArchitecture
     '',
     '值得肯定：',
     bulletList(review.positives, '无。'),
-    '',
-    '变更的敏感面：',
-    surfaceLines,
     '',
     '需关注的问题：',
     review.reviewStatus === 'unavailable' ? '- 未完成：风险清单未生成，不代表未发现风险。' : renderRisks(review.risks),
