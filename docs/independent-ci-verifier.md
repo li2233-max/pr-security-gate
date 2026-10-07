@@ -10,6 +10,7 @@ This reusable workflow provides independently controlled checks for `li2233-max/
 - Secret scanning uses a pinned Gitleaks artifact. Dependency audit reads the candidate lockfile in a pinned Node container; no package install or lifecycle scripts run. The production-hardening check inspects a fixed set of application and CI controls without running candidate code.
 - Payment/refund tests, authorization tests, and Semgrep static scanning are not part of this verifier. A successful manifest provides no evidence that those checks ran.
 - The producer publishes one bounded `verification.json` artifact only after every required check succeeds. The gate accepts it only after validating the Actions run, nested reusable-workflow SHA, exact caller, check suite/jobs, artifact shape, and current repository/base/head/candidate/run/attempt tuple.
+- The caller grants `actions: read`, and the manifest publication job requests it to read the current workflow run identity. A PR run's `head_sha` binds to the PR branch head; the manifest's candidate SHA binds separately to the current merge commit.
 
 The automatically produced checks are `secret-scan`, `dependency-scan`, and `production-hardening-tests`. `architecture-owner-approval` remains a separate human-governed check and is never synthesized by this verifier.
 

@@ -57,6 +57,7 @@ test('独立验证工作流只提供固定 workflow_call 入口和固定检查 j
   assert.doesNotMatch(yaml, /secrets:\s*inherit|pull_request_target|npm\s+(?:ci|install)|node\s+miniprogram\//i);
   assert.match(yaml, /node \.verifier\/\.github\/scripts\/independent-ci-check\.mjs/);
   assert.match(yaml, /publish-verification-manifest\.mjs/);
+  assert.match(yaml.split('  publish-verification-manifest:')[1], /permissions:\s*\n\s+actions:\s*read/);
   assert.match(yaml, /name: independent-ci-verification-\$\{\{ github\.run_attempt \}\}/);
 });
 
@@ -95,6 +96,7 @@ test('独立验证项目模板只调用固定中心工作流且没有 PR 可控�
   assert.match(yaml, /pull_request:/);
   assert.match(yaml, /merge_group:/);
   assert.match(yaml, /checks_requested/);
+  assert.match(yaml, /actions:\s*read/);
   assert.match(yaml, /contents:\s*read/);
   assert.match(yaml, /pull-requests:\s*read/);
   assert.match(yaml, /uses:\s*li2233-max\/pr-security-gate\/\.github\/workflows\/independent-ci-verification\.yml@\{\{VERIFIER_SHA\}\}/);
