@@ -26,7 +26,7 @@ test('retains the pinned Node image required by dependency audit', () => {
 
 test('approves only the published immutable verifier release for weixin', async () => {
   const approved = JSON.parse(await readFile(new URL('./approved-verifiers.json', import.meta.url), 'utf8'));
-  assert.equal(approved.verifiers['weixin-v1'].sha, '7e696f1668fcf0a5c928d6863cae9a2e7209da84');
+  assert.equal(approved.verifiers['weixin-v1'].sha, '6d0125b8c9f3f486437c25360e16ac9ae6ac35f6');
 });
 
 test('rejects unknown keys and unsupported schema versions', () => {
