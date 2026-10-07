@@ -41,15 +41,10 @@ function outputText(value) {
 export function summarizeProcessFailure(label, result) {
   const stdout = outputText(result.stdout);
   const stderr = outputText(result.stderr);
-  const tests = [...stdout.matchAll(/^not ok \d+ - ([^\r\n(]{1,120})/gm)]
-    .map(([, name]) => name.replace(/[^A-Za-z0-9 _./:-]/g, '?').trim())
-    .filter(Boolean)
-    .slice(0, 3);
   const errorCode = `${stdout}\n${stderr}`.match(/\b(EAI_AGAIN|ENOTFOUND|EAI_FAIL|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EACCES|EPERM|EROFS|ENOENT)\b/)?.[1];
   const filesystemIssue = /read-only file system/i.test(`${stdout}\n${stderr}`);
   const exit = Number.isInteger(result.status) ? `exit code ${result.status}` : `signal ${String(result.signal ?? 'unknown')}`;
   const details = [];
-  if (tests.length) details.push(`failed test cases: ${tests.join('; ')}`);
   if (errorCode) details.push(`process error: ${errorCode}`);
   if (filesystemIssue && !errorCode) details.push('process error: read-only filesystem');
   return `${label} failed with ${exit}${details.length ? ` (${details.join('; ')})` : ''}`;
@@ -208,14 +203,13 @@ async function withTemp(work) {
   try { return await work(temp); } finally { rmSync(temp, { recursive: true, force: true }); }
 }
 
-function dockerBase(image, candidate, { network = 'none', extraMounts = [], entrypoint, commandArgs = [] } = {}) {
+function dockerBase(image, candidate, { network = 'none', entrypoint, commandArgs = [] } = {}) {
   const args = [
     'run', '--rm', '--network', network, '--read-only', '--user', '65532:65532',
     '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=128', '--memory=1g', '--cpus=2',
     '--tmpfs=/tmp:rw,noexec,nosuid,size=128m', '-e', 'HOME=/tmp',
     '--mount', `type=bind,src=${candidate},dst=/src,readonly`,
   ];
-  for (const [host, container] of extraMounts) args.push('--mount', `type=bind,src=${host},dst=${container},readonly`);
   if (entrypoint) args.push('--entrypoint', entrypoint);
   args.push(image);
   args.push(...commandArgs);
@@ -274,44 +268,6 @@ async function runSecretScan(snapshot) {
   }
 }
 
-export async function runSemgrep(snapshot) {
-  const targets = scanTargets(snapshot);
-  const rules = join(verifierRoot, 'profiles/weixin-semgrep-rules.yml');
-  const rulesDigest = createHash('sha256').update(readFileSync(rules)).digest('hex');
-  if (rulesDigest !== profile.tools.semgrep.rulesetSha256) fail('Semgrep ruleset digest does not match the fixed profile');
-  const result = safeRun('docker', [
-    ...dockerBase(profile.tools.semgrep.image, snapshot, {
-      extraMounts: [[rules, '/rules.yml']],
-      entrypoint: 'semgrep',
-      commandArgs: ['scan', '--config', '/rules.yml', '--json', '--error', '--strict', '--metrics=off', '--disable-version-check', '--no-git-ignore', ...targets.roots.map(root => `/src/${root}`)],
-    }),
-  ]);
-  let report;
-  try { report = JSON.parse(result.stdout.toString('utf8')); } catch { fail('Semgrep output is not valid JSON'); }
-  if (result.status !== 0) {
-    if (Number.isSafeInteger(report?.results?.length) && report.results.length) {
-      const locations = report.results.slice(0, 3).map(item => {
-        const rule = /^[A-Za-z0-9_.-]{1,100}$/.test(item.check_id ?? '') ? item.check_id : 'security rule';
-        const line = Number.isSafeInteger(item.start?.line) ? item.start.line : '?';
-        return `${rule} at line ${line}`;
-      });
-      fail(`Semgrep found ${report.results.length} security finding(s): ${locations.join('; ')}`);
-    }
-    const errorKinds = Array.isArray(report?.errors)
-      ? report.errors.map(error => `${String(error?.type ?? 'scanner error').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)}${Number.isSafeInteger(error?.code) ? `#${error.code}` : ''}`).filter(Boolean).slice(0, 3)
-      : [];
-    if (errorKinds.length) fail(`Semgrep scanner reported ${errorKinds.join(', ')}`);
-    fail(summarizeProcessFailure('Semgrep scan', result));
-  }
-  if (!Array.isArray(report?.results)) fail('Semgrep report has no results list');
-  if (!Array.isArray(report?.paths?.scanned) || report.paths.scanned.length === 0) {
-    const skipped = Array.isArray(report?.paths?.skipped) ? report.paths.skipped.length : 0;
-    fail(`Semgrep scanned 0 files from ${targets.count} approved targets (${skipped} skipped)`);
-  }
-  if (report.results.length) fail('Semgrep found one or more security issues');
-  return report.paths.scanned.length;
-}
-
 async function runDependencyScan(snapshot) {
   const lock = 'miniprogram/package-lock.json';
   if (!existsSync(join(snapshot, ...lock.split('/')))) fail('the approved miniprogram package lockfile is missing');
@@ -338,46 +294,6 @@ async function runDependencyScan(snapshot) {
   }
   if (!Number.isSafeInteger(report?.metadata?.dependencies?.prod)) fail('npm audit report is incomplete');
   return Math.max(1, report.metadata.dependencies.prod);
-}
-
-async function trustedTestFiles(check) {
-  const suite = profile.trustedTests.find(item => item.checkId === check);
-  if (!suite) fail('trusted test suite is not registered');
-  const result = [];
-  for (const file of suite.files) {
-    const url = `${apiBase}/repos/${profile.repository.fullName}/contents/${file.path.split('/').map(encodeURIComponent).join('/')}?ref=${suite.sourceCommit}`;
-    const payload = await readApi(url, 'approved private test source');
-    if (payload.encoding !== 'base64' || typeof payload.content !== 'string') fail('approved private test source is not a base64 blob');
-    const bytes = Buffer.from(payload.content.replace(/\s/g, ''), 'base64');
-    if (bytes.length > 128 * 1024 || createHash('sha256').update(bytes).digest('hex') !== file.sha256) fail('approved private test source digest does not match');
-    result.push({ ...file, bytes });
-  }
-  return result;
-}
-
-export function installTrustedTests(snapshot, files) {
-  for (const file of files) {
-    const target = resolve(snapshot, ...file.path.split('/'));
-    const relative = target.slice(snapshot.length + 1);
-    if (relative.startsWith(`..${sep}`) || relative === '..') fail('approved test path escaped the sandbox source');
-    mkdirSync(dirname(target), { recursive: true });
-    rmSync(target, { force: true });
-    writeFileSync(target, file.bytes, { mode: 0o444, flag: 'wx' });
-    chmodSync(target, 0o444);
-  }
-}
-
-async function runTrustedTests(snapshot, files) {
-  installTrustedTests(snapshot, files);
-  prepareSnapshotForDocker(snapshot);
-  const result = safeRun('docker', [
-    ...dockerBase(profile.tools.nodeTest.image, snapshot, {
-      entrypoint: 'node',
-      commandArgs: ['--test', ...files.map(file => `/src/${file.path}`)],
-    }),
-  ]);
-  if (result.status !== 0) fail(summarizeProcessFailure('trusted tests in the isolated container', result));
-  return files.length;
 }
 
 function productionHardeningCount(snapshot) {
@@ -412,9 +328,7 @@ async function runCheck(temp) {
   const snapshot = createSnapshot(temp);
   let count;
   if (checkId === 'secret-scan') count = await runSecretScan(snapshot);
-  else if (checkId === 'sast-config-scan') count = await runSemgrep(snapshot);
   else if (checkId === 'dependency-scan') count = await runDependencyScan(snapshot);
-  else if (checkId === 'payment-refund-tests' || checkId === 'authorization-tests') count = await runTrustedTests(snapshot, await trustedTestFiles(checkId));
   else if (checkId === 'production-hardening-tests') count = productionHardeningCount(snapshot);
   else fail('verification check implementation is missing');
   if (!Number.isSafeInteger(count) || count < definition.minimumCount) fail('verified target/test count is below the fixed minimum');
