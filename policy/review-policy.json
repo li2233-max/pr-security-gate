@@ -1,7 +1,6 @@
 {
   "schemaVersion": 2,
   "riskRules": {
-    "access-control.evidence-missing": "访问控制敏感面缺少可复核证据",
     "access-control.bypass": "鉴权或对象级授权可被绕过",
     "authentication.weakness": "认证、Token 或会话控制薄弱",
     "tenant-isolation.violation": "跨用户或跨租户隔离风险",
@@ -36,202 +35,77 @@
       "countsAsDebt": true
     }
   },
-  "evidencePolicy": {
-    "schemaVersion": 1,
-    "types": {
-      "diff_review": "Diff 审查",
-      "sha_binding": "SHA 绑定",
-      "ci_check": "通用 CI 检查",
-      "test": "测试",
-      "authorization_test": "认证与授权测试",
-      "http_exchange": "脱敏 HTTP 请求/响应",
-      "transaction_test": "事务、幂等与并发测试",
-      "secret_scan": "Secret 扫描",
-      "static_analysis": "静态安全扫描",
-      "dependency_scan": "依赖漏洞扫描",
-      "image_scan": "镜像扫描",
-      "iac_scan": "IaC 扫描",
-      "architecture_analysis": "架构确定性检查",
-      "author_claim": "PR 作者声明"
-    },
-    "sources": {
-      "system": {
-        "verified": true,
-        "allowedStatuses": ["passed", "failed", "unavailable"],
-        "allowedTypes": ["diff_review", "sha_binding", "architecture_analysis"]
-      },
-      "github_check": {
-        "verified": true,
-        "allowedStatuses": ["passed", "failed", "pending", "neutral", "skipped"],
-        "allowedTypes": ["ci_check", "test", "authorization_test", "http_exchange", "transaction_test", "secret_scan", "static_analysis", "dependency_scan", "image_scan", "iac_scan", "architecture_analysis"]
-      },
-      "commit_status": {
-        "verified": false,
-        "allowedStatuses": ["passed", "failed", "pending"],
-        "allowedTypes": ["ci_check", "test", "authorization_test", "http_exchange", "transaction_test", "secret_scan", "static_analysis", "dependency_scan", "image_scan", "iac_scan", "architecture_analysis"]
-      },
-      "code_scanning_analysis": {
-        "verified": true,
-        "allowedStatuses": ["passed", "failed", "unavailable"],
-        "allowedTypes": ["static_analysis"]
-      },
-      "pr_assertion": {
-        "verified": false,
-        "allowedStatuses": ["claimed"],
-        "allowedTypes": ["author_claim"]
-      }
-    },
-    "passingStatuses": ["passed"],
-    "codeScanning": {
-      "trustedTools": ["CodeQL"],
-      "minimumRules": 1,
-      "controlPathPatterns": [
-        "(^|/)\\.github/(workflows|actions|codeql)(/|$)",
-        "(^|/)codeql-config\\.ya?ml$"
-      ]
-    },
-    "trustedCheckProducers": ["github-actions-base-workflow", "github-advanced-security"],
-    "excludedCheckNames": ["pr-security-gate"],
-    "checkClassifiers": [
-      {
-        "type": "authorization_test",
-        "pattern": "authorization|authentication|authn|authz|permission|rbac|tenant|401|403|access[-_ ]control"
-      },
-      {
-        "type": "transaction_test",
-        "pattern": "transaction|idempoten|concurren|rollback|race[-_ ]condition"
-      },
-      {
-        "type": "secret_scan",
-        "pattern": "secret[-_ ]scan|gitleaks|trufflehog"
-      },
-      {
-        "type": "dependency_scan",
-        "pattern": "dependency|dependabot|snyk|osv|npm[-_ ]audit|pip[-_ ]audit"
-      },
-      {
-        "type": "image_scan",
-        "pattern": "container[-_ ]scan|image[-_ ]scan|trivy|grype"
-      },
-      {
-        "type": "iac_scan",
-        "pattern": "iac|terraform|checkov|tfsec"
-      },
-      {
-        "type": "static_analysis",
-        "pattern": "codeql|sast|semgrep|sonar"
-      },
-      {
-        "type": "http_exchange",
-        "pattern": "http[-_ ]evidence|api[-_ ]contract|request[-_ ]response"
-      },
-      {
-        "type": "test",
-        "pattern": "test|pytest|jest|vitest|unit|integration|e2e"
-      }
-    ],
-    "surfaceClassifiers": [
-      {
-        "id": "interface-path",
-        "surface": "接口",
-        "pathPattern": "(^|/)(api|routes?|controllers?|handlers?|endpoints?)(/|[._-])"
-      },
-      {
-        "id": "authentication-path",
-        "surface": "认证",
-        "pathPattern": "(^|/)(auth|authentication|login|sessions?|tokens?)(/|[._-])"
-      },
-      {
-        "id": "authorization-path",
-        "surface": "鉴权",
-        "pathPattern": "(^|/)(authorization|authz|guards?|access[-_]?control)(/|[._-])"
-      },
-      {
-        "id": "permission-path",
-        "surface": "权限",
-        "pathPattern": "(^|/)(permissions?|rbac|acl|roles?)(/|[._-])"
-      },
-      {
-        "id": "data-access-path",
-        "surface": "数据",
-        "pathPattern": "(^|/)(database|repositories?|migrations?)(/|[._-])"
-      },
-      {
-        "id": "file-boundary-path",
-        "surface": "文件",
-        "pathPattern": "(^|/)(uploads?|downloads?|attachments?|storage)(/|[._-])"
-      },
-      {
-        "id": "configuration-path",
-        "surface": "配置",
-        "pathPattern": "(^|/)(config|deploy|infra|terraform|k8s|helm)(/|[._-])|(^|/)(Dockerfile|docker-compose[^/]*)$"
-      },
-      {
-        "id": "dependency-path",
-        "surface": "依赖",
-        "pathPattern": "(^|/)(package(-lock)?\\.json|pnpm-lock\\.yaml|yarn\\.lock|pyproject\\.toml|uv\\.lock|poetry\\.lock|Pipfile(\\.lock)?|requirements[^/]*\\.txt|Cargo\\.(toml|lock)|go\\.(mod|sum)|pom\\.xml|build\\.gradle(\\.kts)?)$"
-      },
-      {
-        "id": "ci-path",
-        "surface": "CI",
-        "pathPattern": "(^|/)\\.github/(workflows|actions)/|(^|/)(Jenkinsfile|\\.gitlab-ci\\.ya?ml)$"
-      },
-      {
-        "id": "architecture-contract-path",
-        "surface": "架构",
-        "pathPattern": "^\\.pr-security-gate/(architecture|debt)\\.json$"
-      }
-    ],
-    "requirementsBySurface": {
-      "接口": {
-        "enforcement": "block",
-        "anyOf": ["authorization_test", "http_exchange"]
-      },
-      "认证": {
-        "enforcement": "block",
-        "anyOf": ["authorization_test", "http_exchange"]
-      },
-      "鉴权": {
-        "enforcement": "block",
-        "anyOf": ["authorization_test", "http_exchange"]
-      },
-      "权限": {
-        "enforcement": "block",
-        "anyOf": ["authorization_test", "http_exchange"]
-      },
-      "数据": {
-        "enforcement": "block",
-        "anyOf": ["authorization_test", "http_exchange"]
-      },
-      "文件": {
-        "enforcement": "block",
-        "anyOf": ["test", "authorization_test", "http_exchange"]
-      },
-      "配置": {
-        "enforcement": "block",
-        "anyOf": ["static_analysis", "image_scan", "iac_scan"]
-      },
-      "依赖": {
-        "enforcement": "block",
-        "anyOf": ["dependency_scan"]
-      },
-      "CI": {
-        "enforcement": "block",
-        "anyOf": ["secret_scan", "static_analysis"]
-      },
-      "架构": {
-        "enforcement": "architecture_gate",
-        "anyOf": ["architecture_analysis"]
-      }
-    }
-  },
   "modelInstructions": [
     "P0 必须 BLOCK；仅 P1/P2 才能让 securityGate PASS。",
-    "每个风险必须同时按影响范围、可利用性、暴露范围和可达性定级；CVSS 标签不是最终结论。扫描告警时，在依据中写出已提供的 CVSS、EPSS、已知被利用（KEV）和运行时可达性，未知则写‘未提供’。",
+    "每个风险必须同时按影响范围、可利用性、暴露范围和可达性定级；CVSS 标签不是最终结论。依赖风险可使用已提供的 CVSS、EPSS、已知被利用（KEV）和运行时可达性，未知则写“未提供”，不得编造漏洞信息。",
     "已知被利用、生产运行时可达且影响账户、权限、租户、支付或敏感数据的漏洞升级为 P0；仅开发依赖或代码不可达且有证据的问题可列为 P1/P2。",
     "P2 不得用于密钥泄露、访问控制绕过、跨用户/租户越权、RCE、支付或核心数据风险。",
-    "证据要求必须与变更的敏感面匹配：接口、认证、鉴权、权限或数据涉及/无法判断时，必须提供 401/403、角色、资源归属或失效 Token 等访问控制证据；仅配置、依赖或 CI 涉及时，不得要求上述接口鉴权证据。",
+    "根据实际 diff 和候选合并态源码判断上线风险；不得仅因没有独立 CI、测试、扫描或生产配置检查结果而阻断或登记技术债。访问控制应沿认证入口、角色判断、资源归属和数据访问路径分析具体漏洞。",
     "中心模板中的 pull_request 和 merge_group 标准入口本身不得作为 P0/P1/P2 风险或技术债。",
-    "CI/配置应核对工作流 diff、最小权限、Secret 暴露、是否执行 PR 代码和扫描结果；只有发现具体的 Secret 外传、恶意外部调用、执行不可信 PR 代码或绕过门禁行为时才登记风险。"
+    "CI/配置应核对工作流 diff、最小权限、Secret 暴露、是否执行 PR 代码及生产默认配置；只有发现具体风险或关键代码上下文不足时才登记问题。"
+  ],
+  "sensitiveSurfaces": [
+    "接口",
+    "认证",
+    "鉴权",
+    "权限",
+    "数据",
+    "文件",
+    "配置",
+    "依赖",
+    "CI",
+    "架构"
+  ],
+  "surfaceClassifiers": [
+    {
+      "id": "interface-path",
+      "surface": "接口",
+      "pathPattern": "(^|/)(api|routes?|controllers?|handlers?|endpoints?)(/|[._-])"
+    },
+    {
+      "id": "authentication-path",
+      "surface": "认证",
+      "pathPattern": "(^|/)(auth|authentication|login|sessions?|tokens?)(/|[._-])"
+    },
+    {
+      "id": "authorization-path",
+      "surface": "鉴权",
+      "pathPattern": "(^|/)(authorization|authz|guards?|access[-_]?control)(/|[._-])"
+    },
+    {
+      "id": "permission-path",
+      "surface": "权限",
+      "pathPattern": "(^|/)(permissions?|rbac|acl|roles?)(/|[._-])"
+    },
+    {
+      "id": "data-access-path",
+      "surface": "数据",
+      "pathPattern": "(^|/)(database|repositories?|migrations?)(/|[._-])"
+    },
+    {
+      "id": "file-boundary-path",
+      "surface": "文件",
+      "pathPattern": "(^|/)(uploads?|downloads?|attachments?|storage)(/|[._-])"
+    },
+    {
+      "id": "configuration-path",
+      "surface": "配置",
+      "pathPattern": "(^|/)(config|deploy|infra|terraform|k8s|helm)(/|[._-])|(^|/)(Dockerfile|docker-compose[^/]*)$"
+    },
+    {
+      "id": "dependency-path",
+      "surface": "依赖",
+      "pathPattern": "(^|/)(package(-lock)?\\.json|pnpm-lock\\.yaml|yarn\\.lock|pyproject\\.toml|uv\\.lock|poetry\\.lock|Pipfile(\\.lock)?|requirements[^/]*\\.txt|Cargo\\.(toml|lock)|go\\.(mod|sum)|pom\\.xml|build\\.gradle(\\.kts)?)$"
+    },
+    {
+      "id": "ci-path",
+      "surface": "CI",
+      "pathPattern": "(^|/)\\.github/(workflows|actions)/|(^|/)(Jenkinsfile|\\.gitlab-ci\\.ya?ml)$"
+    },
+    {
+      "id": "architecture-contract-path",
+      "surface": "架构",
+      "pathPattern": "^\\.pr-security-gate/(architecture|debt)\\.json$"
+    }
   ]
 }

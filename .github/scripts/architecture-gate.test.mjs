@@ -19,7 +19,6 @@ const EMPTY_DEBT = { version: 1, items: [] };
 function contract(overrides = {}) {
   return {
     version: 1,
-    contractChangeCheck: 'architecture-owner-approval',
     components: [
       { name: 'a', paths: ['src/a/**'], referenceMarkers: ['@app/a/'], allowedDependencies: ['b'] },
       { name: 'b', paths: ['src/b/**'], referenceMarkers: ['@app/b/'], allowedDependencies: ['a'] },
@@ -53,7 +52,6 @@ function evaluate(options = {}) {
     baseFiles: [],
     candidateFiles: [],
     changedFiles: [],
-    passedChecks: [],
     baseDebt: EMPTY_DEBT,
     candidateDebt: EMPTY_DEBT,
     ...options,
@@ -203,33 +201,18 @@ test('secret and external-output markers that only become combined are blocked',
   assert.equal(result.newViolations.find(item => item.kind === 'combination').details.conservativeCooccurrence, true);
 });
 
-test('critical paths require every configured successful check', () => {
-  const architecture = contract({
-    criticalPaths: [{ id: 'auth-change', paths: ['src/a/auth/**'], requiredChecks: ['auth-tests', 'tenant-tests'] }],
-  });
-  const missing = evaluate({
-    contract: architecture,
+test('critical paths select review scope without requiring independent CI', () => {
+  const result = evaluate({
+    contract: contract({ criticalPaths: [{ id: 'auth-change', paths: ['src/a/auth/**'] }] }),
     changedFiles: ['src/a/auth/login.js'],
-    passedChecks: ['auth-tests'],
   });
-  const complete = evaluate({
-    contract: architecture,
-    changedFiles: ['src/a/auth/login.js'],
-    passedChecks: ['auth-tests', 'tenant-tests'],
-  });
-
-  assert.equal(missing.conclusion, 'BLOCK');
-  assert.equal(missing.newViolations.some(item => item.kind === 'required-check'), true);
-  assert.equal(complete.conclusion, 'PASS');
+  assert.equal(result.conclusion, 'PASS');
 });
 
-test('a contract change cannot approve its own relaxed rules', () => {
-  const blocked = evaluate({ contractChanged: true });
-  const approved = evaluate({ contractChanged: true, passedChecks: ['architecture-owner-approval'] });
-
-  assert.equal(blocked.conclusion, 'BLOCK');
-  assert.equal(blocked.newViolations.some(item => item.ruleId === 'architecture.contract-change-approval'), true);
-  assert.equal(approved.conclusion, 'PASS');
+test('a contract change is reviewed using the supplied protected base rules', () => {
+  const result = evaluate({ contractChanged: true, candidateFiles: [file('src/a/index.js', 'import x from "@app/adapter/x";')] });
+  assert.equal(result.conclusion, 'BLOCK');
+  assert.equal(result.newViolations.some(item => item.kind === 'dependency'), true);
 });
 
 test('budget mode permits growth within budget but blocks crossing a component budget', () => {

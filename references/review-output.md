@@ -45,22 +45,6 @@ PR Head SHA：<PR head；merge_group 时为组合 SHA>
 - CI：涉及 / 未涉及 / 无法判断；<理由>
 - 架构：涉及 / 未涉及 / 无法判断；<理由>
 
-已验证证据：
-- [<证据类型>] <名称>；状态=<status>；来源=<source>；生产者=<producer>；SHA=<candidate SHA>；<脱敏摘要>；[查看证据](<https URL>)
-- 无：<没有通过机器校验的证据时填写>
-
-未验证、失败或不可用证据：
-- [<证据类型>] <名称>；状态=<passed / failed / pending / neutral / skipped / unavailable>；来源=<source>；生产者=<producer>；SHA=<candidate SHA>；<未验证或失败原因>；[查看证据](<https URL>)
-- 无：<无此类证据时填写>
-
-未验证声明（不参与门禁）：
-- [PR 作者声明] PR 描述；状态=claimed；来源=pr_assertion；生产者=<作者>；SHA=<candidate SHA>；<截断并脱敏的声明>；[查看证据](<PR URL>)
-- 无：<PR 正文没有声明时填写>
-
-证据缺口：
-- <敏感面>：缺少当前候选 SHA 上通过且可信的 <允许的证据类型>。
-- 无：<所有适用必需证据均满足时填写>
-
 需关注的问题：
 - [P0/P1/P2] [HIGH/MEDIUM/LOW] <标题>
   - 规则：<稳定 ruleId>
@@ -80,7 +64,6 @@ PR Head SHA：<PR head；merge_group 时为组合 SHA>
 - 新增违规：<ruleId、路径、base→candidate 行为；无则“无”>
 - 已有违规：<保持不变且不阻断的遗留项；无则“无”>
 - 已消除违规：<候选态不再出现的项；无则“无”>
-- 必需检查：<名称与实际状态>
 
 本 PR 技术债：<当前 diff 的 P1/P2 数量> 项
 累计技术债：
@@ -105,6 +88,6 @@ PR Head SHA：<PR head；merge_group 时为组合 SHA>
 | `PASS` | `PASS` | `PASS` |
 | `PASS` | 未配置 | `BLOCK`，受保护 base 必须先配置架构契约和债务账本 |
 
-`securityGate=BLOCK` 的条件包括 P0、对应敏感面缺少证据、无实际 diff、模型失败或输出无效。`architectureGate=BLOCK` 的条件包括 base 契约或债务账本缺失、候选删除契约、新增架构违规、债务未登记、严格 ratchet 或预算越界。P1/P2 本身不使安全门禁失败，但会参与累计债务比较。SHA 在审查期间变化时不得发布旧报告。
+`securityGate=BLOCK` 的条件包括 P0、审查代码不完整、无实际 diff、模型失败或输出无效。`architectureGate=BLOCK` 的条件包括 base 契约或债务账本缺失、候选删除契约、新增架构违规、债务未登记、严格 ratchet 或预算越界。P1/P2 本身不使安全门禁失败，但会参与累计债务比较。SHA 在审查期间变化时不得发布旧报告。
 
 `merge_group` 没有单一 PR 评论位置；报告写入 GitHub Actions job summary，由组合候选 SHA 上的必需检查给出最终门禁结果。

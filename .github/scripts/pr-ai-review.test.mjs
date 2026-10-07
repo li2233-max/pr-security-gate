@@ -46,50 +46,20 @@ function review({
   risks = [],
   technicalDebtCount = risks.filter(item => item.level !== 'P0').length,
   sensitiveSurfaces = surfaces(),
-  evidence = [],
 } = {}) {
   return {
     conclusion,
     summary: '已按规则审查实际 diff。',
     positives: ['已有边界测试。'],
     sensitiveSurfaces,
-    evidence,
     risks,
     technicalDebtCount,
   };
 }
 
-function structuredEvidence(overrides = {}) {
-  return {
-    type: 'authorization_test',
-    source: 'github_check',
-    status: 'passed',
-    sha: 'merge1234',
-    url: 'https://github.com/owner/repo/runs/101',
-    name: 'authorization-tests',
-    summary: '未登录和跨租户访问均返回 403。',
-    producer: 'github-actions-base-workflow',
-    ...overrides,
-  };
-}
-
-function diffEvidence(overrides = {}) {
-  return structuredEvidence({
-    type: 'diff_review',
-    source: 'system',
-    status: 'passed',
-    url: 'https://github.com/owner/repo/compare/base1234...merge1234',
-    name: '候选合并态 Diff',
-    summary: '已读取候选 diff。',
-    producer: 'pr-security-gate',
-    ...overrides,
-  });
-}
-
 function architectureContract() {
   return {
     version: 1,
-    contractChangeCheck: 'architecture-owner-approval',
     components: [{ name: 'app', paths: ['src/**'], referenceMarkers: ['@app/'], allowedDependencies: [] }],
     resourceRules: [],
     criticalPaths: [],
@@ -103,7 +73,6 @@ function passingArchitectureInputs(overrides = {}) {
     baseFiles: [],
     candidateFiles: [],
     changedFiles: [],
-    passedChecks: [],
     baseDebt: { version: 1, items: [] },
     candidateDebt: { version: 1, items: [] },
     ...overrides,
@@ -113,7 +82,6 @@ function passingArchitectureInputs(overrides = {}) {
 test('P1 和 P2 返回 PASS 且技术债只显示计数', () => {
   const result = validateReview(review({ risks: [risk('P1', '错误语义'), risk('P2', '日志字段')] }), {
     sensitiveChanged: false,
-    evidenceForSensitivePath: true,
   });
   const markdown = renderReport(baseContext, result);
 
@@ -122,436 +90,27 @@ test('P1 和 P2 返回 PASS 且技术债只显示计数', () => {
   assert.doesNotMatch(markdown, /负责人：|Issue：|截止日期：|闭环状态：/);
 });
 
-test('P0、无效结论和涉及访问控制但无证据均阻断合并', () => {
+test('P0 与无效结论阻断合并，敏感面本身不要求独立 CI', () => {
   const p0 = validateReview(review({ risks: [risk('P0', '疑似密钥泄露')], technicalDebtCount: 0 }));
-  const insufficientEvidence = validateReview(review({
+  const codeReview = validateReview(review({
     sensitiveSurfaces: surfaces({ 权限: { status: '涉及', reason: '变更资源访问控制' } }),
   }));
 
   assert.equal(p0.conclusion, 'BLOCK');
-  assert.equal(insufficientEvidence.conclusion, 'BLOCK');
+  assert.equal(codeReview.conclusion, 'PASS');
   assert.throws(() => validateReview({ conclusion: 'MAYBE' }, {}));
-});
-
-test('“未提供 401/403”不能冒充访问控制证据', () => {
-  const claim = structuredEvidence({
-    type: 'author_claim',
-    source: 'pr_assertion',
-    status: 'claimed',
-    name: 'PR 描述',
-    url: 'https://github.com/owner/repo/pull/8',
-    summary: '未提供 401/403 权限回归测试。',
-    producer: 'pull-request-author',
-  });
-  const result = validateReview(review({
-    sensitiveSurfaces: surfaces({ 权限: { status: '涉及', reason: '变更资源访问控制' } }),
-    evidence: [claim],
-  }), { candidateSha: 'merge1234', collectedEvidence: [claim] });
-
-  assert.equal(result.conclusion, 'BLOCK');
-});
-
-test('访问控制只接受目录中绑定候选 SHA 的结构化已验证证据', () => {
-  const evidence = structuredEvidence();
-  const raw = review({
-    sensitiveSurfaces: surfaces({ 权限: { status: '涉及', reason: '变更资源访问控制' } }),
-    evidence: [evidence],
-  });
-  const result = validateReview(raw, {
-    candidateSha: 'merge1234',
-    collectedEvidence: [evidence],
-  });
-
-  assert.equal(result.conclusion, 'PASS');
-  assert.equal(result.evidence[0].verified, true);
-  assert.throws(() => validateReview(raw, {
-    candidateSha: 'another-candidate',
-    collectedEvidence: [evidence],
-  }), /候选 SHA/);
-  assert.throws(() => validateReview(raw, {
-    candidateSha: 'merge1234',
-    collectedEvidence: [],
-  }), /证据目录/);
-});
-
-test('PR 正文中的 401/403 只能作为作者声明，不能满足访问控制证据', () => {
-  const claim = structuredEvidence({
-    type: 'author_claim',
-    source: 'pr_assertion',
-    status: 'claimed',
-    name: 'PR 描述',
-    url: 'https://github.com/owner/repo/pull/8',
-    producer: 'pull-request-author',
-  });
-  const result = validateReview(review({
-    sensitiveSurfaces: surfaces({ 权限: { status: '涉及', reason: '变更资源访问控制' } }),
-    evidence: [claim],
-  }), {
-    candidateSha: 'merge1234',
-    collectedEvidence: [claim],
-  });
-
-  assert.equal(result.conclusion, 'BLOCK');
-  assert.equal(result.evidence[0].verified, false);
 });
 
 test('模型不能把机器规则命中的认证路径降级为未涉及', () => {
   const result = validateReview(review(), {
     candidateSha: 'merge1234',
-    collectedEvidence: [],
     changedFiles: ['src/auth/session-middleware.ts', 'package.json'],
   });
 
   assert.equal(result.sensitiveSurfaces.认证.status, '涉及');
   assert.match(result.sensitiveSurfaces.认证.reason, /机器策略/);
   assert.equal(result.sensitiveSurfaces.依赖.status, '涉及');
-  assert.equal(result.conclusion, 'BLOCK');
-});
-
-test('工作流从当前 PR、候选 SHA Check Runs 和 Code Scanning 采集证据', async () => {
-  const event = {
-    number: 8,
-    pull_request: {
-      title: '权限修复',
-      body: '本地验证：未登录请求返回 403。',
-      html_url: 'https://github.com/owner/repo/pull/8',
-      base: { ref: 'main', sha: 'base1234' },
-      head: { ref: 'feature/authz', sha: 'head1234', repo: { fork: false } },
-      merge_commit_sha: 'merge1234',
-      user: { login: 'author' },
-    },
-  };
-  let checkRunReads = 0;
-  let scanToolName = 'CodeQL';
-  const fetchImpl = async url => {
-    if (url.endsWith('/pulls/8')) {
-      return new Response(JSON.stringify({
-        state: 'open',
-        body: '本地验证：未登录请求返回 403。',
-        html_url: 'https://github.com/owner/repo/pull/8',
-        base: { sha: 'base1234' },
-        head: { sha: 'head1234' },
-        merge_commit_sha: 'merge1234',
-      }));
-    }
-    if (url.includes('/commits/merge1234/check-runs')) {
-      checkRunReads += 1;
-      const completed = checkRunReads >= 2;
-      return new Response(JSON.stringify({
-        total_count: 2,
-        check_runs: [
-          {
-            id: 101,
-            name: 'authorization-tests',
-            head_sha: 'merge1234',
-            status: completed ? 'completed' : 'in_progress',
-            conclusion: completed ? 'success' : null,
-            details_url: 'https://github.com/owner/repo/actions/runs/501/job/101',
-            check_suite: { id: 700 },
-            app: { slug: 'github-actions' },
-            output: { title: 'Authorization tests', summary: '401/403 和跨租户用例通过。' },
-          },
-          {
-            id: 102,
-            name: 'stale-authorization-tests',
-            head_sha: 'old-sha',
-            status: 'completed',
-            conclusion: 'success',
-            html_url: 'https://github.com/owner/repo/runs/102',
-            app: { slug: 'github-actions' },
-            output: { title: 'Stale tests', summary: '旧结果。' },
-          },
-        ],
-      }));
-    }
-    if (url.includes('/commits/merge1234/status')) {
-      return new Response(JSON.stringify({ total_count: 0, statuses: [] }));
-    }
-    if (url.endsWith('/actions/runs/501')) {
-      const completed = checkRunReads >= 2;
-      return new Response(JSON.stringify({
-        id: 501,
-        check_suite_id: 700,
-        head_sha: 'merge1234',
-        status: completed ? 'completed' : 'in_progress',
-        conclusion: completed ? 'success' : null,
-        event: 'pull_request',
-        path: '.github/workflows/authorization-tests.yml',
-      }));
-    }
-    if (url.includes('/contents/.github/workflows/authorization-tests.yml?ref=base1234')) {
-      return new Response(JSON.stringify({
-        type: 'file',
-        encoding: 'base64',
-        content: Buffer.from('name: authorization-tests\n').toString('base64'),
-      }));
-    }
-    if (url.includes('/contents/.github/workflows/authorization-tests.yml?ref=merge1234')) {
-      return new Response(JSON.stringify({
-        type: 'file',
-        encoding: 'base64',
-        content: Buffer.from('name: authorization-tests\n').toString('base64'),
-      }));
-    }
-    if (url.includes('/code-scanning/analyses')) {
-      return new Response(JSON.stringify([{
-        id: 201,
-        commit_sha: 'merge1234',
-        category: '/language:javascript',
-        error: '',
-        results_count: 0,
-        rules_count: 128,
-        tool: { name: scanToolName },
-        url: 'https://api.github.com/repos/owner/repo/code-scanning/analyses/201',
-      }]));
-    }
-    if (url.includes('/code-scanning/alerts')) {
-      return new Response(JSON.stringify([]));
-    }
-    throw new Error(`未预期请求：${url}`);
-  };
-  const dependencies = createWorkflowDependencies({
-    event,
-    env: {
-      GITHUB_REPOSITORY: 'owner/repo',
-      GITHUB_TOKEN: 'github-token',
-      EVIDENCE_CHECK_WAIT_MS: '50',
-    },
-    fetchImpl,
-  });
-
-  const context = await dependencies.getPullRequest();
-  const evidence = await dependencies.getEvidence();
-  const claim = evidence.find(item => item.source === 'pr_assertion');
-  const authorization = evidence.find(item => item.name === 'authorization-tests');
-  const stale = evidence.find(item => item.name === 'stale-authorization-tests');
-  const codeScanning = evidence.find(item => item.source === 'code_scanning_analysis');
-
-  assert.equal(claim.verified, false);
-  assert.equal(claim.status, 'claimed');
-  assert.equal(authorization.type, 'authorization_test');
-  assert.equal(authorization.sha, 'merge1234');
-  assert.equal(authorization.verified, true);
-  assert.equal(stale, undefined);
-  assert.equal(codeScanning.type, 'static_analysis');
-  assert.equal(codeScanning.status, 'passed');
-  assert.equal(codeScanning.verified, true);
-  assert.equal(checkRunReads, 2);
-
-  scanToolName = 'Untrusted Scanner';
-  const evidenceFromUntrustedScanner = await dependencies.getEvidence();
-  const untrustedScanner = evidenceFromUntrustedScanner.find(item => item.source === 'code_scanning_analysis');
-  assert.equal(untrustedScanner.status, 'unavailable');
-  assert.equal(untrustedScanner.verified, false);
-
-  scanToolName = 'CodeQL';
-  context.changedFiles = ['.github/workflows/reusable-security-check.yml'];
-  const evidenceAfterWorkflowChange = await dependencies.getEvidence();
-  assert.equal(
-    evidenceAfterWorkflowChange.find(item => item.name === 'authorization-tests').verified,
-    false,
-  );
-  const scanningAfterWorkflowChange = evidenceAfterWorkflowChange.find(item => item.source === 'code_scanning_analysis');
-  assert.equal(scanningAfterWorkflowChange.status, 'unavailable');
-  assert.equal(scanningAfterWorkflowChange.verified, false);
-});
-
-test('PR 自己新增的 GitHub Actions 工作流不能伪造可信授权证据', async () => {
-  const event = {
-    number: 8,
-    pull_request: {
-      title: '新增伪造授权检查',
-      html_url: 'https://github.com/owner/repo/pull/8',
-      base: { ref: 'main', sha: 'base1234' },
-      head: { ref: 'feature/authz', sha: 'head1234', repo: { fork: false } },
-      merge_commit_sha: 'merge1234',
-      user: { login: 'author' },
-    },
-  };
-  const workflowPath = '.github/workflows/authorization-tests.yml';
-  const fetchImpl = async url => {
-    if (url.endsWith('/pulls/8')) {
-      return new Response(JSON.stringify({
-        state: 'open',
-        body: '',
-        html_url: 'https://github.com/owner/repo/pull/8',
-        base: { sha: 'base1234' },
-        head: { sha: 'head1234' },
-        merge_commit_sha: 'merge1234',
-      }));
-    }
-    if (url.includes('/commits/merge1234/check-runs')) {
-      return new Response(JSON.stringify({
-        total_count: 1,
-        check_runs: [{
-          id: 101,
-          name: 'authorization-tests',
-          head_sha: 'merge1234',
-          status: 'completed',
-          conclusion: 'success',
-          details_url: 'https://github.com/owner/repo/actions/runs/501/job/101',
-          app: { slug: 'github-actions' },
-          output: { title: 'Authorization tests', summary: '声称授权测试通过。' },
-        }],
-      }));
-    }
-    if (url.includes('/commits/merge1234/status')) {
-      return new Response(JSON.stringify({ total_count: 0, statuses: [] }));
-    }
-    if (url.includes('/code-scanning/')) {
-      return new Response('', { status: 403 });
-    }
-    if (url.endsWith('/actions/runs/501')) {
-      return new Response(JSON.stringify({
-        id: 501,
-        head_sha: 'merge1234',
-        status: 'completed',
-        conclusion: 'success',
-        event: 'pull_request',
-        path: workflowPath,
-      }));
-    }
-    if (url.includes(`/contents/${encodeURIComponent('.github')}/${encodeURIComponent('workflows')}/${encodeURIComponent('authorization-tests.yml')}?ref=base1234`)) {
-      return new Response('', { status: 404 });
-    }
-    if (url.includes(`/contents/${encodeURIComponent('.github')}/${encodeURIComponent('workflows')}/${encodeURIComponent('authorization-tests.yml')}?ref=merge1234`)) {
-      return new Response(JSON.stringify({
-        type: 'file',
-        encoding: 'base64',
-        content: Buffer.from('name: forged\n').toString('base64'),
-      }));
-    }
-    throw new Error(`未预期请求：${url}`);
-  };
-  const dependencies = createWorkflowDependencies({
-    event,
-    env: { GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'github-token' },
-    fetchImpl,
-  });
-
-  const evidence = await dependencies.getEvidence();
-  const authorization = evidence.find(item => item.name === 'authorization-tests');
-
-  assert.equal(authorization.source, 'github_check');
-  assert.equal(authorization.status, 'passed');
-  assert.equal(authorization.verified, false);
-});
-
-test('Check Suite 与 Workflow Run 不匹配时不能借用可信运行结果', async () => {
-  const event = {
-    number: 8,
-    pull_request: {
-      title: '借用其他 workflow run',
-      html_url: 'https://github.com/owner/repo/pull/8',
-      base: { ref: 'main', sha: 'base1234' },
-      head: { ref: 'feature/authz', sha: 'head1234', repo: { fork: false } },
-      merge_commit_sha: 'merge1234',
-      user: { login: 'author' },
-    },
-  };
-  const workflowContent = 'name: authorization-tests\n';
-  const fetchImpl = async url => {
-    if (url.endsWith('/pulls/8')) {
-      return new Response(JSON.stringify({
-        state: 'open', body: '', html_url: 'https://github.com/owner/repo/pull/8',
-        base: { sha: 'base1234' }, head: { sha: 'head1234' }, merge_commit_sha: 'merge1234',
-      }));
-    }
-    if (url.includes('/commits/merge1234/check-runs')) {
-      return new Response(JSON.stringify({
-        total_count: 1,
-        check_runs: [{
-          id: 101,
-          name: 'authorization-tests',
-          head_sha: 'merge1234',
-          status: 'completed',
-          conclusion: 'success',
-          details_url: 'https://github.com/owner/repo/actions/runs/501/job/101',
-          check_suite: { id: 700 },
-          app: { slug: 'github-actions' },
-          output: { title: 'Authorization tests', summary: '借用其他成功 run。' },
-        }],
-      }));
-    }
-    if (url.includes('/commits/merge1234/status')) {
-      return new Response(JSON.stringify({ total_count: 0, statuses: [] }));
-    }
-    if (url.includes('/code-scanning/')) return new Response('', { status: 403 });
-    if (url.endsWith('/actions/runs/501')) {
-      return new Response(JSON.stringify({
-        id: 501,
-        check_suite_id: 701,
-        head_sha: 'merge1234',
-        status: 'completed',
-        conclusion: 'success',
-        event: 'pull_request',
-        path: '.github/workflows/authorization-tests.yml',
-      }));
-    }
-    if (url.includes('/contents/.github/workflows/authorization-tests.yml?ref=')) {
-      return new Response(JSON.stringify({
-        type: 'file', encoding: 'base64', content: Buffer.from(workflowContent).toString('base64'),
-      }));
-    }
-    throw new Error(`未预期请求：${url}`);
-  };
-  const dependencies = createWorkflowDependencies({
-    event,
-    env: { GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'github-token' },
-    fetchImpl,
-  });
-
-  const evidence = await dependencies.getEvidence();
-  const authorization = evidence.find(item => item.name === 'authorization-tests');
-
-  assert.equal(authorization.verified, false);
-});
-
-test('真实采集的授权 Check 即使未被模型复述也能满足门禁', async () => {
-  const evidence = structuredEvidence();
-  let prompt = '';
-  const result = await runReview({
-    getPullRequest: async () => ({ ...baseContext, isFork: false }),
-    getDiff: async () => 'diff --git a/src/auth.js b/src/auth.js\n+authorize(request);',
-    getEvidence: async () => [evidence],
-    readPolicy: async () => '# policy',
-    callModel: async request => {
-      prompt = request.prompt;
-      return review({
-        sensitiveSurfaces: surfaces({ 权限: { status: '涉及', reason: '变更资源访问控制' } }),
-        evidence: [],
-      });
-    },
-    getArchitectureInputs: async () => passingArchitectureInputs(),
-    upsertComment: async () => {},
-  });
-
   assert.equal(result.conclusion, 'PASS');
-  assert.match(prompt, /authorization-tests/);
-  assert.match(prompt, /PR 正文.*未验证声明/);
-});
-
-test('报告按结构展示已验证证据与未验证声明', () => {
-  const verified = structuredEvidence();
-  const claim = structuredEvidence({
-    type: 'author_claim',
-    source: 'pr_assertion',
-    status: 'claimed',
-    name: 'PR 描述',
-    url: 'https://github.com/owner/repo/pull/8',
-    producer: 'pull-request-author',
-  });
-  const result = validateReview(review({ evidence: [verified, claim] }), {
-    candidateSha: 'merge1234',
-    collectedEvidence: [verified, claim],
-  });
-  const markdown = renderReport(baseContext, result);
-
-  assert.match(markdown, /已验证证据/);
-  assert.match(markdown, /authorization-tests/);
-  assert.match(markdown, /merge1234/);
-  assert.match(markdown, /未验证声明/);
-  assert.doesNotMatch(markdown, /\[object Object\]/);
 });
 
 test('二进制或缺少补丁内容的 diff 不能冒充已审查证据', () => {
@@ -600,79 +159,11 @@ test('二进制或缺少补丁内容的 diff 不能冒充已审查证据', () =>
   ].join('\n'), [{ filename: 'bin/tool', additions: 0, deletions: 0, changes: 0 }]));
 });
 
-test('结构化证据总量包含门禁自产证据并限制为 100 项', async () => {
-  const externalEvidence = Array.from({ length: 99 }, (_, index) => structuredEvidence({
-    type: 'ci_check',
-    name: `ci-${index}`,
-    url: `https://github.com/owner/repo/checks/${index}`,
-    summary: `CI ${index} passed.`,
-  }));
-  let modelCalled = false;
-  let comment = '';
-  const result = await runReview({
-    getPullRequest: async () => ({ ...baseContext, isFork: false }),
-    getDiff: async () => 'diff --git a/src/app.js b/src/app.js\n@@ -1 +1 @@\n-old\n+new',
-    getEvidence: async () => externalEvidence,
-    readPolicy: async () => '# policy',
-    callModel: async () => {
-      modelCalled = true;
-      return review();
-    },
-    upsertComment: async markdown => { comment = markdown; },
-  });
-
-  assert.equal(result.conclusion, 'BLOCK');
-  assert.equal(modelCalled, false);
-  assert.match(comment, /结构化证据超过 100 项/);
-});
-
-test('仅 CI 和配置改动不要求接口鉴权证据', () => {
-  const diff = diffEvidence();
-  const staticScan = structuredEvidence({
-    type: 'static_analysis',
-    name: 'static-analysis',
-    summary: '静态安全分析通过。',
-  });
-  const result = validateReview(review({
-    sensitiveSurfaces: surfaces({
-      配置: { status: '涉及', reason: '变更工作流配置' },
-      CI: { status: '涉及', reason: '变更 PR 审查工作流' },
-    }),
-    evidence: [],
-  }), { candidateSha: 'merge1234', collectedEvidence: [diff, staticScan] });
-
-  assert.equal(result.conclusion, 'PASS');
-});
-
-test('CI 或配置不能仅凭已读取 diff 掩盖不可用的安全扫描', () => {
-  const diff = diffEvidence();
-  const unavailableScan = structuredEvidence({
-    type: 'static_analysis',
-    source: 'code_scanning_analysis',
-    status: 'unavailable',
-    name: 'GitHub Code Scanning',
-    url: 'https://github.com/owner/repo/security/code-scanning',
-    summary: 'Code Scanning API 不可用。',
-    producer: 'github-code-scanning',
-  });
-  const result = validateReview(review({
-    sensitiveSurfaces: surfaces({
-      配置: { status: '涉及', reason: '变更工作流配置' },
-      CI: { status: '涉及', reason: '变更 PR 审查工作流' },
-    }),
-  }), { candidateSha: 'merge1234', collectedEvidence: [diff, unavailableScan] });
-
-  assert.equal(result.conclusion, 'BLOCK');
-  assert.deepEqual(result.evidenceGaps.map(item => item.surface).sort(), ['CI', '配置']);
-});
-
 test('标准 pull_request CI 入口不会被列为风险项', async () => {
   let prompt = '';
-  const staticScan = structuredEvidence({ type: 'static_analysis', name: 'static-analysis', summary: '静态安全分析通过。' });
   const result = await runReview({
     getPullRequest: async () => ({ ...baseContext, isFork: false, changedFiles: ['.github/workflows/pr-ai-review.yml'] }),
     getDiff: async () => 'diff --git a/.github/workflows/pr-ai-review.yml b/.github/workflows/pr-ai-review.yml\n+on:\n+  pull_request:\n+jobs:\n+  security-review:\n+    uses: li2233-max/pr-security-gate/.github/workflows/pr-ai-review.yml@v1',
-    getEvidence: async () => [staticScan],
     readPolicy: async () => '# PR 安全审查门禁',
     callModel: async ({ prompt: value }) => {
       prompt = value;
@@ -681,7 +172,6 @@ test('标准 pull_request CI 入口不会被列为风险项', async () => {
           配置: { status: '涉及', reason: '新增标准工作流配置' },
           CI: { status: '涉及', reason: '使用中心审查入口' },
         }),
-        evidence: [],
       });
     },
     getArchitectureInputs: async () => passingArchitectureInputs(),
@@ -715,7 +205,6 @@ test('存在明确 Secret 外传时仍作为 CI 专属 P0，且不追加无关�
         配置: { status: '涉及', reason: '变更工作流配置' },
         CI: { status: '涉及', reason: '工作流可访问 Secret' },
       }),
-      evidence: [],
     }),
     upsertComment: async markdown => { comment = markdown; },
   });
@@ -960,7 +449,6 @@ test('候选 PR 不能用自己新增的契约替代受保护 base 契约', asyn
   };
   const architecture = {
     version: 1,
-    contractChangeCheck: 'architecture-owner-approval',
     components: [{ name: 'app', paths: ['src/**'], referenceMarkers: ['@app/'], allowedDependencies: [] }],
     resourceRules: [],
     criticalPaths: [],
@@ -1008,7 +496,6 @@ test('候选合并态不能删除受保护 base 上的架构契约', async () =>
   };
   const architecture = {
     version: 1,
-    contractChangeCheck: 'architecture-owner-approval',
     components: [{ name: 'app', paths: ['src/**'], referenceMarkers: ['@app/'], allowedDependencies: [] }],
     resourceRules: [],
     criticalPaths: [],
@@ -1131,7 +618,6 @@ test('工作流从固定 base/candidate SHA 构建组合架构态并复用未变
   };
   const architecture = {
     version: 1,
-    contractChangeCheck: 'architecture-owner-approval',
     components: [
       { name: 'a', paths: ['src/a/**'], referenceMarkers: ['@app/a/'], allowedDependencies: ['b'] },
       { name: 'b', paths: ['src/b/**'], referenceMarkers: ['@app/b/'], allowedDependencies: ['a'] },
@@ -1148,6 +634,9 @@ test('工作流从固定 base/candidate SHA 构建组合架构态并复用未变
   }));
   const blobCalls = [];
   const fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/pulls/9')) {
+      return new Response(JSON.stringify({ ...event.pull_request, state: 'open' }));
+    }
     if (url.includes('/compare/base1234...merge1234')) {
       if (options.headers?.accept === 'application/vnd.github.v3.diff') {
         return new Response('diff --git a/src/b/b.js b/src/b/b.js\n@@ -0,0 +1 @@\n+import "@app/a/service"');
@@ -1197,70 +686,6 @@ test('工作流从固定 base/candidate SHA 构建组合架构态并复用未变
   assert.equal(result.conclusion, 'BLOCK');
   assert.equal(result.newViolations.some(item => item.kind === 'cycle'), true);
   assert.equal(blobCalls.filter(sha => sha === 'blob-a').length, 1);
-});
-
-test('同名 legacy status 不能伪造架构负责人审批', async () => {
-  const event = {
-    number: 10,
-    pull_request: {
-      base: { ref: 'main', sha: 'base1234' },
-      head: { ref: 'feature/relax-contract', sha: 'head1234', repo: { fork: false } },
-      merge_commit_sha: 'merge1234',
-    },
-  };
-  const baseContract = {
-    version: 1,
-    contractChangeCheck: 'architecture-owner-approval',
-    components: [{ name: 'app', paths: ['src/**'], referenceMarkers: ['@app/'], allowedDependencies: [] }],
-    resourceRules: [],
-    criticalPaths: [],
-    debtBudgets: { mode: 'ratchet', total: 0, components: { app: 0 } },
-  };
-  const candidateContract = {
-    ...baseContract,
-    debtBudgets: { mode: 'ratchet', total: 1, components: { app: 1 } },
-  };
-  const debt = { version: 1, items: [] };
-  const encodeFile = value => new Response(JSON.stringify({
-    type: 'file',
-    encoding: 'base64',
-    content: Buffer.from(JSON.stringify(value)).toString('base64'),
-  }));
-  const fetchImpl = async url => {
-    if (url.endsWith('/contents/.pr-security-gate/architecture.json?ref=base1234')) return encodeFile(baseContract);
-    if (url.endsWith('/contents/.pr-security-gate/architecture.json?ref=merge1234')) return encodeFile(candidateContract);
-    if (url.includes('/contents/.pr-security-gate/debt.json')) return encodeFile(debt);
-    if (url.includes('/git/trees/')) return new Response(JSON.stringify({ truncated: false, tree: [] }));
-    if (url.includes('/commits/merge1234/check-runs')) {
-      return new Response(JSON.stringify({ total_count: 0, check_runs: [] }));
-    }
-    if (url.includes('/commits/merge1234/status')) {
-      return new Response(JSON.stringify({
-        total_count: 1,
-        statuses: [{
-          context: 'architecture-owner-approval',
-          state: 'success',
-          sha: 'merge1234',
-          target_url: 'https://example.com/forged',
-          creator: { login: 'pull-request-author' },
-        }],
-      }));
-    }
-    throw new Error(`未预期请求：${url}`);
-  };
-  const dependencies = createWorkflowDependencies({
-    event,
-    env: {
-      GITHUB_REPOSITORY: 'owner/repo',
-      GITHUB_TOKEN: 'github-token',
-      ARCHITECTURE_CHECK_WAIT_MS: '0',
-    },
-    fetchImpl,
-  });
-
-  const inputs = await dependencies.getArchitectureInputs(review());
-
-  assert.deepEqual(inputs.passedChecks, []);
 });
 
 test('工作流依赖使用 GitHub API 和 DeepSeek，并更新已有报告评论', async () => {
@@ -1341,7 +766,7 @@ test('中心工作流默认从自身仓库根目录读取审查规则', async ()
   assert.deepEqual(paths, [
     fileURLToPath(new URL('../../SKILL.md', import.meta.url)),
     fileURLToPath(new URL('../../references/review-output.md', import.meta.url)),
-    fileURLToPath(new URL('../../references/evidence-requirements.md', import.meta.url)),
+    fileURLToPath(new URL('../../references/ai-review-requirements.md', import.meta.url)),
     fileURLToPath(new URL('../../references/architecture-contract.md', import.meta.url)),
   ]);
 });
@@ -1354,7 +779,7 @@ test('可复用工作流只读取中心仓库的固定规则，且不执行项�
   assert.match(yaml, /repository: \$\{\{ job\.workflow_repository \}\}/);
   assert.match(yaml, /ref: \$\{\{ job\.workflow_sha \}\}/);
   assert.match(yaml, /persist-credentials: false/);
-  assert.match(yaml, /checks: read/);
+  assert.match(yaml, /contents: read/);
   assert.doesNotMatch(yaml, /github\.event\.pull_request\.head/);
   assert.doesNotMatch(yaml, /npm (ci|install)|pnpm install|yarn install/);
 });

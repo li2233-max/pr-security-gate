@@ -90,7 +90,6 @@ export function validateArchitectureContract(raw) {
   if (source.version !== 1) {
     throw new ArchitectureGateError('architecture contract version must be 1');
   }
-  const contractChangeCheck = requireText(source.contractChangeCheck, 'contractChangeCheck');
   if (!Array.isArray(source.components) || source.components.length === 0) {
     throw new ArchitectureGateError('components must be a non-empty array');
   }
@@ -200,11 +199,6 @@ export function validateArchitectureContract(raw) {
       id: requireText(rule.id, `criticalPaths[${index}].id`),
       paths: requireTextArray(rule.paths, `criticalPaths[${index}].paths`, { nonEmpty: true })
         .map((path, pathIndex) => normalizeGlob(path, `criticalPaths[${index}].paths[${pathIndex}]`)),
-      requiredChecks: requireTextArray(
-        rule.requiredChecks,
-        `criticalPaths[${index}].requiredChecks`,
-        { nonEmpty: true },
-      ),
     };
   });
   if (new Set(criticalPaths.map(rule => rule.id)).size !== criticalPaths.length) {
@@ -232,7 +226,6 @@ export function validateArchitectureContract(raw) {
 
   return {
     version: 1,
-    contractChangeCheck,
     components,
     resourceRules,
     combinationRules,
@@ -518,36 +511,6 @@ function combinationViolations(rawFiles, contract) {
 
 export function findCombinationViolations(files, rawContract) {
   return combinationViolations(files, validateArchitectureContract(rawContract));
-}
-
-function requiredCheckViolations(changedFiles, passedChecks, contract) {
-  if (!Array.isArray(changedFiles)) {
-    throw new ArchitectureGateError('changedFiles must be an array');
-  }
-  const paths = [...new Set(changedFiles.map((path, index) => normalizePath(path, `changedFiles[${index}]`)))].sort();
-  const passed = new Set(requireTextArray(passedChecks, 'passedChecks'));
-  const violations = [];
-  for (const rule of contract.criticalPaths) {
-    const affectedPaths = paths.filter(path => rule.paths.some(pattern => matchesGlob(path, pattern)));
-    if (affectedPaths.length === 0) continue;
-    for (const check of rule.requiredChecks) {
-      if (passed.has(check)) continue;
-      violations.push(makeViolation({
-        identity: `required-check:${rule.id}:${check}`,
-        kind: 'required-check',
-        ruleId: `critical-path.${rule.id}`,
-        component: 'repository',
-        path: affectedPaths[0],
-        message: `${check} must pass for critical path ${rule.id}`,
-        details: { check, affectedPaths },
-      }));
-    }
-  }
-  return violations;
-}
-
-export function findRequiredCheckViolations(changedFiles, passedChecks, rawContract) {
-  return requiredCheckViolations(changedFiles, passedChecks, validateArchitectureContract(rawContract));
 }
 
 function normalizeDebtItem(rawItem, label, { requireFingerprint = true, requireFirstSeen = true } = {}) {
@@ -843,7 +806,6 @@ export function evaluateArchitectureGate({
   candidateFiles,
   changedFiles,
   contractChanged = false,
-  passedChecks = [],
   baseDebt,
   candidateDebt,
   currentDebtItems = [],
@@ -912,18 +874,6 @@ export function evaluateArchitectureGate({
   const existingCycles = candidateCycles.filter(item => remainsOneCycle(item.details.components, baseReachability));
   const resolvedCycles = baseCycles.filter(item => !remainsOneCycle(item.details.components, candidateReachability));
 
-  const checkViolations = requiredCheckViolations(actualChangedFiles, passedChecks, contract);
-  if (contractChanged && !new Set(passedChecks).has(contract.contractChangeCheck)) {
-    checkViolations.push(makeViolation({
-      identity: `contract-change-check:${contract.contractChangeCheck}`,
-      kind: 'required-check',
-      ruleId: 'architecture.contract-change-approval',
-      component: 'repository',
-      path: '.pr-security-gate/architecture.json',
-      message: `${contract.contractChangeCheck} must pass before changing the architecture contract`,
-      details: { check: contract.contractChangeCheck },
-    }));
-  }
   const debt = evaluateDebtRatchet({
     baseLedger: baseDebt,
     candidateLedger: candidateDebt,
@@ -935,7 +885,6 @@ export function evaluateArchitectureGate({
   const newViolations = sortViolations([
     ...comparable.newViolations,
     ...newCycles,
-    ...checkViolations,
     ...debt.violations,
   ]);
   const existingViolations = sortViolations([...comparable.existingViolations, ...existingCycles]);

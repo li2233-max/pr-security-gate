@@ -1,16 +1,18 @@
 ---
 name: pr-security-gate
-description: 审查 PR 的安全风险、候选合并态架构不变量与累计技术债，并输出可用于 GitHub 合并门禁的可追溯报告。适用于认证、鉴权、权限、敏感数据、文件、配置、依赖、外部 API、批处理、CI 或跨模块架构变更。
+description: 用 AI 分析 PR 实际改动和候选合并后的代码，判断上线风险，并结合架构不变量与累计技术债输出可追溯的合并门禁报告。适用于安全、业务正确性、配置、依赖或跨模块变更。
 ---
 
 # PR 安全与架构审查门禁
 
 ## 按任务读取规则
 
-- 审查 PR 时，读取 [references/evidence-requirements.md](references/evidence-requirements.md)、[references/review-output.md](references/review-output.md) 和 [references/architecture-contract.md](references/architecture-contract.md)。
+- 审查 PR 时，读取 [references/ai-review-requirements.md](references/ai-review-requirements.md)、[references/review-output.md](references/review-output.md) 和 [references/architecture-contract.md](references/architecture-contract.md)。
 - 为新项目接入中心门禁时，先读取 [references/new-project-integration.md](references/new-project-integration.md)。
 
 ## 核心原则
+
+**AI 审查**：看 PR 改了什么，以及候选合并后的代码，判断可能的上线风险。审查依据是实际 diff 和固定 SHA 的候选源码；缺少独立 CI、测试或扫描结果本身不阻断，也不登记技术债。
 
 门禁审查的是“当前 PR 合并到最新 base 后形成的候选仓库”，不是孤立的单份 diff。实际判定等价于：
 
@@ -29,7 +31,7 @@ securityGate == BLOCK 或 architectureGate == BLOCK => BLOCK
 
 P0/P1/P2 只表示安全审查风险等级。普通架构违规不得伪装成安全 P0；只有它实际影响认证、权限、租户隔离、资金、核心数据或审计时才按对应安全影响定级。
 
-机器强制执行的敏感面、等级映射和阻断属性以 [policy/review-policy.json](policy/review-policy.json) 为唯一事实源；正文规则不得另建一套相冲突的枚举。PR 描述、Check Runs 和扫描结果形成的安全证据只是辅助输入，不能替代候选合并态、base 架构契约或累计债务比较。
+机器强制执行的敏感面、等级映射和阻断属性以 [policy/review-policy.json](policy/review-policy.json) 为唯一事实源；正文规则不得另建一套相冲突的枚举。PR 描述只是作者声明和辅助输入，不能替代候选源码、base 架构契约或累计债务比较。
 
 ## 所需输入
 
@@ -38,7 +40,7 @@ P0/P1/P2 只表示安全审查风险等级。普通架构违规不得伪装成�
 - 受保护 base 上的 `.pr-security-gate/architecture.json` 和 `.pr-security-gate/debt.json`，以及候选合并态的债务账本。
 - 事件类型及 SHA：`pull_request` 使用 base/head/候选 merge SHA，`merge_group` 使用目标 base、队列 parent 和组合候选 SHA。
 - 仓库、分支、提交信息、提交者和 Review 模式；未知项写“未提供”。
-- GitHub 上的 PR 描述、Check Runs、legacy commit statuses 和 Code Scanning analysis/开放 alert 元数据；正文和 legacy status 只作为未验证声明。关键请求/响应只有在受信 Check 明确产出脱敏摘要时才算机器证据。
+- GitHub 上的 PR 描述，可辅助理解改动意图；其中的通过声明不能替代代码分析。
 
 ## 主流程
 
@@ -49,15 +51,15 @@ P0/P1/P2 只表示安全审查风险等级。普通架构违规不得伪装成�
 5. **确认 SHA 仍然有效**：报告发布前重新核对 base/head/merge SHA；base 更新、PR 新增提交或 Merge Queue 组合变化时，旧 PASS 失效并重新审查。
 6. **输出最终 PASS/BLOCK**：分别计算 `securityGate` 与 `architectureGate`，任一为 `BLOCK` 则最终 `BLOCK`；按 [references/review-output.md](references/review-output.md) 输出，首行必须是 `Code Review 完成`。
 
-安全证据采集服务于第 1 步：逐项标记接口、认证、鉴权、权限、数据、文件、配置、依赖和 CI，并按 [references/evidence-requirements.md](references/evidence-requirements.md) 校验适用证据。证据目录不能改变第 2—5 步的候选态、契约、债务或 SHA 结论。
+AI 逐项分析接口、认证、鉴权、权限、数据、文件、配置、依赖、CI 和架构。风险应说明具体位置、变更前后行为、触发路径和上线影响；按 [references/ai-review-requirements.md](references/ai-review-requirements.md) 核对审查依据。
 
 ## 安全风险与 securityGate
 
-- P0 / `HIGH`：重大且存在可行攻击或失败路径，或高影响敏感面缺少对应证据。`securityGate=BLOCK`。
+- P0 / `HIGH`：重大且存在可行攻击或失败路径。`securityGate=BLOCK`。
 - P1 / `MEDIUM`：风险明确但受前置条件、影响范围或生产可达性限制。计入本 PR 技术债，安全门禁本身可 `PASS`。
 - P2 / `LOW`：低影响加固、诊断或安全可维护性问题。计入本 PR 技术债，安全门禁本身可 `PASS`。
 
-定级必须同时考虑影响范围、可利用性、暴露范围和运行时可达性。CVSS 或扫描器标签只是输入；依赖告警还应结合 EPSS、KEV、直接/间接依赖和实际可达性。密钥泄露、访问控制绕过、跨用户/租户越权、RCE、支付或核心数据风险不得写成 P2。
+定级必须同时考虑影响范围、可利用性、暴露范围和运行时可达性。依赖风险结合版本、直接/间接依赖和实际使用路径判断；未知漏洞信息写“未提供”。密钥泄露、访问控制绕过、跨用户/租户越权、RCE、支付或核心数据风险不得写成 P2。
 
 ## architectureGate 与累计技术债
 
@@ -68,7 +70,7 @@ P0/P1/P2 只表示安全审查风险等级。普通架构违规不得伪装成�
 - `ratchet`：严格执行 `candidateDebt <= baseDebt`，候选累计数量不得高于 base；无关 PR 不因已有债务被阻断。
 - `budget`：预算内允许增长；首次越界阻断。base 已超预算时，数量不变或下降可通过，继续增加则阻断。
 - 配置 `maxAgeDays` 时，超过治理期限且仍未关闭的债务阻断。
-- 本 PR 的 P1/P2 必须登记到候选账本；删除账本条目不等于问题已修复，仍需测试、扫描或负责人审批证据。
+- 本 PR 的 P1/P2 必须登记到候选账本；删除账本条目不等于问题已修复，AI 应结合候选代码复核。负责人审批由目标项目的 CODEOWNERS 和合并规则执行。
 
 例如 base 已有 1 项，当前 PR 新增 1 项，则本 PR 技术债是 1，候选累计是 2；旧实现只显示前者，看起来像历史被清零。严格 `ratchet` 会因 `2 > 1` 阻断，`budget` 则按配置额度判断。
 
@@ -76,5 +78,5 @@ P0/P1/P2 只表示安全审查风险等级。普通架构违规不得伪装成�
 
 - `pull_request` 报告是单 PR 预审；可靠防止旧 base 结果继续使用，还必须启用“Require branches to be up to date”或 Merge Queue。
 - 推荐 Merge Queue；`merge_group` 在最新目标分支与队列前序 PR 的组合候选 SHA 上重跑，报告写入 job summary。
-- P0、架构契约/债务账本缺失、架构新增违规、债务策略违规、缺少必需证据、模型失败、无效输出或 SHA 漂移均应使必需检查失败。
-- 中心流程只静态读取 diff、受影响源码切片和 GitHub 检查结果；不得安装依赖或执行 PR 代码。
+- P0、架构契约/债务账本缺失、架构新增违规、债务策略违规、审查代码不完整、模型失败、无效输出或 SHA 漂移均应使必需检查失败。
+- 中心流程只静态读取 diff、候选源码、契约、债务账本和 PR 描述；不得安装依赖或执行 PR 代码。

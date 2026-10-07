@@ -8,12 +8,8 @@ on:
         required: true
 
 permissions:
-  actions: read
   contents: read
   pull-requests: write
-  checks: read
-  security-events: read
-  statuses: read
 
 concurrency:
   group: pr-ai-review-${{ github.repository }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
