@@ -42,3 +42,13 @@ test('项目入口模板只调用中心工作流并显式传递 API Key', async 
   assert.doesNotMatch(yaml, /steps:/);
   assert.doesNotMatch(yaml, /run:/);
 });
+
+const testWorkflowPath = new URL('../.github/workflows/test.yml', import.meta.url);
+
+test('中心单元测试工作流遵循仓库 Actions allowlist，不调用外部 action', async () => {
+  const yaml = await readFile(testWorkflowPath, 'utf8');
+  assert.doesNotMatch(yaml, /^\s+uses:/m);
+  assert.match(yaml, /git fetch --no-tags --depth=1 origin/);
+  assert.match(yaml, /node --version/);
+  assert.match(yaml, /npm test/);
+});

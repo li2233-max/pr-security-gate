@@ -2,10 +2,28 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { assertReviewableDiff, createWorkflowDependencies, redact, renderReport, runReview, validateReview } from './pr-ai-review.mjs';
+import { assertReviewableDiff, createWorkflowDependencies, formatFatalError, redact, renderReport, runReview, validateReview } from './pr-ai-review.mjs';
 import { evaluateArchitectureGate } from './architecture-gate.mjs';
 
 const surfaceNames = ['接口', '认证', '鉴权', '权限', '数据', '文件', '配置', '依赖', 'CI', '架构'];
+
+test('formatFatalError reports the real error while redacting credentials', () => {
+  const diagnostic = formatFatalError(new Error('GitHub request failed: Bearer github_pat_1234567890abcdef'));
+  assert.match(diagnostic, /GitHub request failed/);
+  assert.match(diagnostic, /\[REDACTED\]/);
+  assert.doesNotMatch(diagnostic, /github_pat_1234567890abcdef/);
+});
+
+test('PR 使用本次运行的 GITHUB_SHA，事件中的旧候选 SHA 不覆盖它', async () => {
+  const pr = { state: 'open', base: { ref: 'main', sha: 'base1234' }, head: { ref: 'feature', sha: 'head1234', repo: { fork: false } }, merge_commit_sha: 'current-merge' };
+  const deps = createWorkflowDependencies({
+    event: { number: 8, pull_request: { ...pr, merge_commit_sha: 'stale-merge' } },
+    env: { GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'github-token', GITHUB_SHA: 'current-merge' },
+    fetchImpl: async () => new Response(JSON.stringify(pr)),
+  });
+  assert.equal((await deps.getPullRequest()).mergeSha, 'current-merge');
+  await deps.ensureFreshContext();
+});
 
 function surfaces(overrides = {}) {
   return Object.fromEntries(surfaceNames.map(name => [name, overrides[name] ?? { status: '未涉及', reason: 'diff 未涉及' }]));
@@ -287,6 +305,9 @@ test('模型调用失败会产生 BLOCK 而不是 PASS', async () => {
 
   assert.equal(result.conclusion, 'BLOCK');
   assert.match(comment, /安全审查不可用或输出无效/);
+  assert.match(comment, /安全审查状态：不可用（未完成）/);
+  assert.match(comment, /本 PR 技术债：未能判定/);
+  assert.doesNotMatch(comment, /未发现 P0、P1 或 P2 问题|本 PR 技术债：0 项/);
 });
 
 test('fork PR 不读取 diff 也不调用模型', async () => {
@@ -607,87 +628,6 @@ test('base 与候选合并态都必须提供有效债务账本', async () => {
   );
 });
 
-test('工作流从固定 base/candidate SHA 构建组合架构态并复用未变 blob', async () => {
-  const event = {
-    number: 9,
-    pull_request: {
-      base: { ref: 'main', sha: 'base1234' },
-      head: { ref: 'feature/cycle', sha: 'head1234', repo: { fork: false } },
-      merge_commit_sha: 'merge1234',
-    },
-  };
-  const architecture = {
-    version: 1,
-    components: [
-      { name: 'a', paths: ['src/a/**'], referenceMarkers: ['@app/a/'], allowedDependencies: ['b'] },
-      { name: 'b', paths: ['src/b/**'], referenceMarkers: ['@app/b/'], allowedDependencies: ['a'] },
-    ],
-    resourceRules: [],
-    criticalPaths: [],
-    debtBudgets: { mode: 'ratchet', total: 0, components: { a: 0, b: 0 } },
-  };
-  const debt = { version: 1, items: [] };
-  const encodeFile = value => new Response(JSON.stringify({
-    type: 'file',
-    encoding: 'base64',
-    content: Buffer.from(JSON.stringify(value)).toString('base64'),
-  }));
-  const blobCalls = [];
-  const fetchImpl = async (url, options = {}) => {
-    if (url.endsWith('/pulls/9')) {
-      return new Response(JSON.stringify({ ...event.pull_request, state: 'open' }));
-    }
-    if (url.includes('/compare/base1234...merge1234')) {
-      if (options.headers?.accept === 'application/vnd.github.v3.diff') {
-        return new Response('diff --git a/src/b/b.js b/src/b/b.js\n@@ -0,0 +1 @@\n+import "@app/a/service"');
-      }
-      return new Response(JSON.stringify({
-        status: 'ahead',
-        merge_base_commit: { sha: 'base1234' },
-        files: [{ filename: 'src/b/b.js' }],
-      }));
-    }
-    if (url.includes('/contents/.pr-security-gate/architecture.json')) return encodeFile(architecture);
-    if (url.includes('/contents/.pr-security-gate/debt.json')) return encodeFile(debt);
-    if (url.endsWith('/git/trees/base1234?recursive=1')) {
-      return new Response(JSON.stringify({
-        truncated: false,
-        tree: [{ type: 'blob', path: 'src/a/a.js', sha: 'blob-a', size: 24 }],
-      }));
-    }
-    if (url.endsWith('/git/trees/merge1234?recursive=1')) {
-      return new Response(JSON.stringify({
-        truncated: false,
-        tree: [
-          { type: 'blob', path: 'src/a/a.js', sha: 'blob-a', size: 24 },
-          { type: 'blob', path: 'src/b/b.js', sha: 'blob-b', size: 24 },
-        ],
-      }));
-    }
-    if (url.includes('/git/blobs/')) {
-      const sha = url.split('/').at(-1);
-      blobCalls.push(sha);
-      const content = sha === 'blob-a' ? 'import "@app/b/service"' : 'import "@app/a/service"';
-      return new Response(JSON.stringify({ encoding: 'base64', content: Buffer.from(content).toString('base64') }));
-    }
-    throw new Error(`未预期请求：${url} ${options.method ?? 'GET'}`);
-  };
-  const dependencies = createWorkflowDependencies({
-    event,
-    env: { GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'github-token' },
-    fetchImpl,
-  });
-  const context = await dependencies.getPullRequest();
-  await dependencies.getDiff();
-  context.changedFiles = ['src/b/b.js'];
-  const inputs = await dependencies.getArchitectureInputs(review());
-  const result = evaluateArchitectureGate(inputs);
-
-  assert.equal(result.conclusion, 'BLOCK');
-  assert.equal(result.newViolations.some(item => item.kind === 'cycle'), true);
-  assert.equal(blobCalls.filter(sha => sha === 'blob-a').length, 1);
-});
-
 test('工作流依赖使用 GitHub API 和 DeepSeek，并更新已有报告评论', async () => {
   const event = {
     number: 8,
@@ -742,6 +682,7 @@ test('工作流依赖使用 GitHub API 和 DeepSeek，并更新已有报告评�
   assert.equal(deepSeekCall.options.headers.authorization, 'Bearer deepseek-key');
   const deepSeekBody = JSON.parse(deepSeekCall.options.body);
   assert.equal(deepSeekBody.model, 'deepseek-v4-pro');
+  assert.equal(deepSeekBody.max_tokens, 16_384);
   assert.equal(deepSeekBody.messages[0].role, 'system');
   assert.match(deepSeekBody.messages[0].content, /不可信数据/);
   assert.deepEqual(deepSeekBody.messages[1], { role: 'user', content: '审查 diff' });
@@ -794,4 +735,258 @@ test('接入文档包含 pull_request、merge_group、Secret、中心工作流�
   assert.match(setup, /pull_request/);
   assert.match(setup, /merge_group/);
   assert.match(setup, /标准入口/);
+});
+
+test('模型收到固定 SHA 的架构预检事实，已有契约不会被当成未提供', async () => {
+  let prompt;
+  let reads = 0;
+  const result = await runReview({
+    getPullRequest: async () => ({ ...baseContext, isFork: false }),
+    getDiff: async () => 'diff --git a/src/app.js b/src/app.js\n@@ -0,0 +1 @@\n+const ok = true;',
+    getArchitectureInputs: async () => {
+      reads += 1;
+      return passingArchitectureInputs({
+        candidateFiles: [{ path: 'src/app.js', content: 'const secret = "not-for-model-context";' }],
+      });
+    },
+    readPolicy: async () => '# policy',
+    callModel: async request => { prompt = request.prompt; return review(); },
+    upsertComment: async () => {},
+  });
+
+  const facts = JSON.parse(prompt.match(/^架构预检事实：(.*)$/m)?.[1] ?? 'null');
+  assert.ok(facts, '模型必须收到程序实际检查到的架构事实');
+  assert.equal(facts.baseSha, 'base1234');
+  assert.equal(facts.candidateSha, 'merge1234');
+  assert.equal(facts.configured, true);
+  assert.equal(facts.conclusion, 'PASS');
+  assert.equal(facts.baseDebtCount, 0);
+  assert.equal(facts.candidateDebtCount, 0);
+  assert.equal(reads, 1, '最终债务判定必须复用同一份固定 SHA 快照');
+  assert.doesNotMatch(prompt, /not-for-model-context/);
+  assert.equal(result.conclusion, 'PASS');
+});
+
+
+test('架构预检失败如实传给模型，模型 PASS 仍不能覆盖缺失契约或读取失败', async () => {
+  for (const getInputs of [
+    async () => ({ contract: null }),
+    async () => { throw new Error('base ledger read failed: Bearer github_pat_1234567890abcdef'); },
+  ]) {
+    let prompt;
+    const result = await runReview({
+      getPullRequest: async () => ({ ...baseContext, isFork: false }),
+      getDiff: async () => 'diff --git a/docs/guide.md b/docs/guide.md',
+      getArchitectureInputs: getInputs,
+      readPolicy: async () => '# policy',
+      callModel: async request => { prompt = request.prompt; return review(); },
+      upsertComment: async () => {},
+    });
+
+    const facts = JSON.parse(prompt.match(/^架构预检事实：(.*)$/m)?.[1] ?? 'null');
+    assert.ok(facts);
+    assert.equal(facts.conclusion, 'BLOCK');
+    assert.doesNotMatch(prompt, /github_pat_1234567890abcdef/);
+    assert.equal(result.securityConclusion, 'PASS');
+    assert.equal(result.conclusion, 'BLOCK');
+  }
+});
+
+
+test('架构预检 PASS 后仍核对 AI 新发现的 P1/P2 是否登记到账本', async () => {
+  const result = await runReview({
+    getPullRequest: async () => ({ ...baseContext, isFork: false }),
+    getDiff: async () => 'diff --git a/src/app.js b/src/app.js\n@@ -0,0 +1 @@\n+return [];',
+    getArchitectureInputs: async () => passingArchitectureInputs(),
+    readPolicy: async () => '# policy',
+    callModel: async () => review({ risks: [risk('P1', '失败被误表示为空结果', { location: 'src/app.js:1' })] }),
+    upsertComment: async () => {},
+  });
+
+  assert.equal(result.securityConclusion, 'PASS');
+  assert.equal(result.conclusion, 'BLOCK');
+  assert.equal(result.architecture.debt.missingCurrentItems.length, 1);
+  assert.equal(result.architecture.debt.missingCurrentItems[0].path, 'src/app.js');
+});
+
+
+test('DeepSeek 审查结构校验失败时最多纠正重试一次', async () => {
+  let attempts = 0;
+  const prompts = [];
+  const result = await runReview({
+    getPullRequest: async () => ({ ...baseContext, isFork: false, changedFiles: ['docs/guide.md'] }),
+    getDiff: async () => 'diff --git a/docs/guide.md b/docs/guide.md',
+    readPolicy: async () => '# PR 安全审查门禁',
+    callModel: async request => {
+      attempts += 1;
+      prompts.push(request.prompt);
+      return attempts === 1 ? review({ sensitiveSurfaces: [] }) : review();
+    },
+    getArchitectureInputs: async () => passingArchitectureInputs(),
+    upsertComment: async () => {},
+  });
+
+  assert.equal(attempts, 2);
+  assert.match(prompts[1], /上一次输出未通过结构校验/);
+  assert.equal(result.securityConclusion, 'PASS');
+  assert.equal(result.conclusion, 'PASS');
+
+  let invalidAttempts = 0;
+  const stillInvalid = await runReview({
+    getPullRequest: async () => ({ ...baseContext, isFork: false, changedFiles: ['docs/guide.md'] }),
+    getDiff: async () => 'diff --git a/docs/guide.md b/docs/guide.md',
+    readPolicy: async () => '# PR 安全审查门禁',
+    callModel: async () => {
+      invalidAttempts += 1;
+      return review({ sensitiveSurfaces: [] });
+    },
+    getArchitectureInputs: async () => passingArchitectureInputs(),
+    upsertComment: async () => {},
+  });
+
+  assert.equal(invalidAttempts, 2);
+  assert.equal(stillInvalid.conclusion, 'BLOCK');
+  assert.match(stillInvalid.diagnostic, /sensitiveSurfaces 必须是对象/);
+});
+
+
+test('DeepSeek 截断 JSON 时报告 finish_reason，而不是泛化成 JSON 解析错误', async () => {
+  const dependencies = createWorkflowDependencies({
+    event: {
+      number: 1,
+      pull_request: {
+        base: { ref: 'main', sha: 'base1234' },
+        head: { ref: 'feature/review', sha: 'head1234', repo: { fork: false } },
+        merge_commit_sha: 'merge1234',
+      },
+    },
+    env: {
+      GITHUB_REPOSITORY: 'owner/repo',
+      GITHUB_TOKEN: 'github-token',
+      DEEPSEEK_API_KEY: 'deepseek-key',
+    },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: '{"conclusion":' }, finish_reason: 'length' }],
+    })),
+  });
+
+  await assert.rejects(
+    dependencies.callModel({ model: 'deepseek-v4-pro', prompt: '请输出合法 JSON。' }),
+    /finish_reason=length/,
+  );
+});
+
+
+test('PR freshness failure identifies which snapshot field changed', async () => {
+  const dependencies = createWorkflowDependencies({
+    event: {
+      number: 8,
+      pull_request: {
+        base: { ref: 'main', sha: 'base1234' },
+        head: { ref: 'feature/review', sha: 'head1234', repo: { fork: false } },
+        merge_commit_sha: 'merge1234',
+      },
+    },
+    env: { GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'github-token' },
+    fetchImpl: async () => new Response(JSON.stringify({
+      state: 'open',
+      base: { sha: 'base1234' },
+      head: { sha: 'head1234' },
+      merge_commit_sha: 'merge5678',
+    })),
+  });
+
+  await assert.rejects(
+    dependencies.ensureFreshContext(),
+    /merge_commit_sha: expected merge1234, actual merge5678/,
+  );
+});
+
+
+test('架构快照跳过契约范围内的 PNG，并从固定 SHA 构建组合态', async () => {
+  const event = {
+    number: 9,
+    pull_request: {
+      base: { ref: 'main', sha: 'base1234' },
+      head: { ref: 'feature/cycle', sha: 'head1234', repo: { fork: false } },
+      merge_commit_sha: 'merge1234',
+    },
+  };
+  const architecture = {
+    version: 1,
+    components: [
+      { name: 'a', paths: ['src/a/**'], referenceMarkers: ['@app/a/'], allowedDependencies: ['b'] },
+      { name: 'b', paths: ['src/b/**'], referenceMarkers: ['@app/b/'], allowedDependencies: ['a'] },
+    ],
+    resourceRules: [],
+    criticalPaths: [],
+    debtBudgets: { mode: 'ratchet', total: 0, components: { a: 0, b: 0 } },
+  };
+  const debt = { version: 1, items: [] };
+  const encodeFile = value => new Response(JSON.stringify({
+    type: 'file',
+    encoding: 'base64',
+    content: Buffer.from(JSON.stringify(value)).toString('base64'),
+  }));
+  const blobCalls = [];
+  const fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/pulls/9')) return new Response(JSON.stringify({ ...event.pull_request, state: 'open' }));
+    if (url.includes('/compare/base1234...merge1234')) {
+      if (options.headers?.accept === 'application/vnd.github.v3.diff') {
+        return new Response('diff --git a/src/b/b.js b/src/b/b.js\n@@ -0,0 +1 @@\n+import "@app/a/service"');
+      }
+      return new Response(JSON.stringify({
+        status: 'ahead',
+        merge_base_commit: { sha: 'base1234' },
+        files: [{ filename: 'src/b/b.js' }],
+      }));
+    }
+    if (url.includes('/contents/.pr-security-gate/architecture.json')) return encodeFile(architecture);
+    if (url.includes('/contents/.pr-security-gate/debt.json')) return encodeFile(debt);
+    if (url.endsWith('/git/trees/base1234?recursive=1')) {
+      return new Response(JSON.stringify({
+        truncated: false,
+        tree: [
+          { type: 'blob', path: 'src/a/a.js', sha: 'blob-a', size: 24 },
+          { type: 'blob', path: 'src/a/assets/poster.png', sha: 'blob-png', size: 24 },
+        ],
+      }));
+    }
+    if (url.endsWith('/git/trees/merge1234?recursive=1')) {
+      return new Response(JSON.stringify({
+        truncated: false,
+        tree: [
+          { type: 'blob', path: 'src/a/a.js', sha: 'blob-a', size: 24 },
+          { type: 'blob', path: 'src/b/b.js', sha: 'blob-b', size: 24 },
+          { type: 'blob', path: 'src/a/assets/poster.png', sha: 'blob-png', size: 24 },
+        ],
+      }));
+    }
+    if (url.includes('/git/blobs/')) {
+      const sha = url.split('/').at(-1);
+      blobCalls.push(sha);
+      const content = sha === 'blob-a'
+        ? Buffer.from('import "@app/b/service"')
+        : sha === 'blob-b'
+          ? Buffer.from('import "@app/a/service"')
+          : Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+      return new Response(JSON.stringify({ encoding: 'base64', content: content.toString('base64') }));
+    }
+    throw new Error(`未预期请求：${url} ${options.method ?? 'GET'}`);
+  };
+  const dependencies = createWorkflowDependencies({
+    event,
+    env: { GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'github-token' },
+    fetchImpl,
+  });
+  const context = await dependencies.getPullRequest();
+  await dependencies.getDiff();
+  context.changedFiles = ['src/b/b.js'];
+  const inputs = await dependencies.getArchitectureInputs(review());
+  const result = evaluateArchitectureGate(inputs);
+
+  assert.equal(result.conclusion, 'BLOCK');
+  assert.equal(result.newViolations.some(item => item.kind === 'cycle'), true);
+  assert.equal(blobCalls.filter(sha => sha === 'blob-a').length, 1);
+  assert.equal(blobCalls.filter(sha => sha === 'blob-png').length, 1);
 });

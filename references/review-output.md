@@ -18,6 +18,7 @@ PR Head SHA：<PR head；merge_group 时为组合 SHA>
 队列 Parent SHA：<merge_group payload base SHA；不适用则“不适用”>
 
 安全门禁：BLOCK / PASS
+安全审查状态：已完成 / 不可用（未完成）
 架构门禁：BLOCK / PASS / 未配置（BLOCK）
 判定结果：BLOCK / PASS
 合并动作：禁止合并 / 可合并
@@ -57,7 +58,8 @@ PR Head SHA：<PR head；merge_group 时为组合 SHA>
   - 修复建议：<可执行修复和验证>
   - 是否阻塞安全门禁：<P0 是；P1/P2 否>
   - 状态：未解决 / 已缓解
-- 无：<无问题时填写；否则不得填写“无”>
+- 无：未发现 P0、P1 或 P2 问题。仅当安全审查状态为“已完成”且 risks 为空时使用。
+- 未完成：安全审查不可用，风险清单未生成；这不代表未发现风险。安全审查状态为 unavailable 时使用。
 
 架构门禁详情：
 - 配置状态：已配置 / 未配置
@@ -89,5 +91,7 @@ PR Head SHA：<PR head；merge_group 时为组合 SHA>
 | `PASS` | 未配置 | `BLOCK`，受保护 base 必须先配置架构契约和债务账本 |
 
 `securityGate=BLOCK` 的条件包括 P0、审查代码不完整、无实际 diff、模型失败或输出无效。`architectureGate=BLOCK` 的条件包括 base 契约或债务账本缺失、候选删除契约、新增架构违规、债务未登记、严格 ratchet 或预算越界。P1/P2 本身不使安全门禁失败，但会参与累计债务比较。SHA 在审查期间变化时不得发布旧报告。
+
+模型调用失败、空内容、截断或 JSON/schema 无效时，必须输出 `安全审查状态：不可用（未完成）`、`安全门禁：BLOCK`，并把敏感面、风险列表与本 PR 技术债标为“未能判定”。不得用空 risks 推导“未发现问题”，也不得把审查失败伪装成具体风险发现。诊断限于脱敏元数据，禁止输出原始模型回复或密钥。
 
 `merge_group` 没有单一 PR 评论位置；报告写入 GitHub Actions job summary，由组合候选 SHA 上的必需检查给出最终门禁结果。

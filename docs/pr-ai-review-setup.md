@@ -22,6 +22,8 @@ AI 分析实际 diff 和候选合并后的代码，判断安全、业务正确�
 
 ## 项目架构契约
 
+AI 调用前会收到固定 SHA 上的架构预检结果，包括配置状态、违规增量和债务数量，避免把已经读取的契约/账本误写成“未提供”。AI 返回后仍会把本次新发现的 P1/P2 加入同一快照重新核对债务；最终 PASS/BLOCK 继续由安全与架构两个门禁共同决定。
+
 先按项目实际情况定制并合入 base：
 
 - [架构模板](../templates/architecture.json) → `.pr-security-gate/architecture.json`
