@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { assertReviewableDiff, createWorkflowDependencies, formatFatalError, redact, renderReport, runReview, validateReview } from './pr-ai-review.mjs';
+import { assertReviewableDiff, changedFilesFromDiff, createWorkflowDependencies, formatFatalError, redact, renderReport, runReview, validateReview } from './pr-ai-review.mjs';
 import { evaluateArchitectureGate } from './architecture-gate.mjs';
 
 const surfaceNames = ['接口', '认证', '鉴权', '权限', '数据', '文件', '配置', '依赖', 'CI', '架构'];
@@ -175,6 +175,85 @@ test('二进制或缺少补丁内容的 diff 不能冒充已审查证据', () =>
     'old mode 100644',
     'new mode 100755',
   ].join('\n'), [{ filename: 'bin/tool', additions: 0, deletions: 0, changes: 0 }]));
+});
+
+test('diff 文件清单解码 Git 中文八进制路径，并保留空格和转义字符', () => {
+  const cases = [
+    ['diff --git a/src/app.js b/src/app.js', 'src/app.js'],
+    [String.raw`diff --git "a/docs/\346\226\207.md" "b/docs/\346\226\207.md"`, 'docs/文.md'],
+    ['diff --git a/docs/文.md b/docs/文.md', 'docs/文.md'],
+    ['diff --git a/docs/my guide.md b/docs/my guide.md', 'docs/my guide.md'],
+    [String.raw`diff --git a/docs/old.md "b/docs/\346\226\207.md"`, 'docs/文.md'],
+    [String.raw`diff --git a/docs/old.md "b/docs/new b/\346\226\207.md"`, 'docs/new b/文.md'],
+    [String.raw`diff --git "a/docs/\346\226\207.md" b/docs/new.md`, 'docs/new.md'],
+    [String.raw`diff --git "a/docs/old.md" "b/docs/a\"b\\c\t\n.md"`, 'docs/a"b\\c\t\n.md'],
+  ];
+  for (const [header, expected] of cases) {
+    assert.deepEqual(changedFilesFromDiff(`${header}\n@@ -1 +1 @@\n-old\n+new`), [expected]);
+  }
+});
+
+test('diff 中文路径的纯重命名、空文件和权限变更使用解码后的元数据', () => {
+  const header = String.raw`diff --git "a/docs/\346\226\207.md" "b/docs/\346\226\207.md"`;
+  const metadata = [{ filename: 'docs/文.md', additions: 0, deletions: 0, changes: 0 }];
+  for (const [fileHeader, body] of [
+    [header, 'old mode 100644\nnew mode 100755'],
+    [header, 'new file mode 100644\nindex 0000000..e69de29'],
+    [String.raw`diff --git a/docs/old.md "b/docs/\346\226\207.md"`,
+      'similarity index 100%\nrename from docs/old.md\nrename to "docs/\\346\\226\\207.md"'],
+  ]) {
+    assert.doesNotThrow(() => assertReviewableDiff(`${fileHeader}\n${body}`, metadata));
+    assert.throws(() => assertReviewableDiff(`${fileHeader}\n${body}`, [
+      { filename: 'docs/文.md', additions: 1, deletions: 1, changes: 2 },
+    ]), /缺少可审查补丁/);
+  }
+});
+
+test('diff 无效路径转义不能被静默跳过或替换成其他文件', () => {
+  for (const header of [
+    String.raw`diff --git "a/docs/old.md" "b/docs/\q.md"`,
+    String.raw`diff --git "a/docs/old.md" "b/docs/\400.md"`,
+    String.raw`diff --git "a/docs/old.md" "b/docs/\377.md"`,
+    String.raw`diff --git "a/docs/old.md" "b/docs/\000.md"`,
+    String.raw`diff --git "a/docs/old.md" "b/docs/new.md`,
+    String.raw`diff --git a/docs/old.md "b/docs/new b/\q.md"`,
+    String.raw`diff --git a/docs/old.md "b/docs/new b/\346\226\207.md`,
+    'diff --git a/docs/old.md "c/docs/new.md"',
+  ]) {
+    assert.throws(() => changedFilesFromDiff(header), /候选 diff/);
+    assert.throws(() => assertReviewableDiff(`${header}\n@@ -1 +1 @@\n-old\n+new`), /候选 diff/);
+  }
+});
+
+test('diff 中文路径的二进制与缺失补丁仍然阻断', () => {
+  const header = String.raw`diff --git "a/docs/\346\226\207.md" "b/docs/\346\226\207.md"`;
+  assert.throws(() => assertReviewableDiff(`${header}\nGIT binary patch`), /二进制.*docs\/文\.md/);
+  assert.throws(() => assertReviewableDiff(header), /缺少可审查补丁.*docs\/文\.md/);
+});
+
+test('候选 diff 中文路径与 API 文件清单一致时可审查，真正缺失时仍阻断', async () => {
+  const diff = `${String.raw`diff --git "a/docs/\346\226\207.md" "b/docs/\346\226\207.md"`}\n@@ -1 +1 @@\n-old\n+new`;
+  for (const missing of [false, true]) {
+    const dependencies = createWorkflowDependencies({
+      event: { number: 8, pull_request: {
+        base: { ref: 'main', sha: 'base1234' },
+        head: { ref: 'feature/review', sha: 'head1234', repo: { fork: false } },
+        merge_commit_sha: 'merge1234',
+      } },
+      env: { GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'github-token' },
+      fetchImpl: async (url, options = {}) => {
+        assert.ok(url.endsWith('/compare/base1234...merge1234'));
+        if (options.headers?.accept === 'application/vnd.github.v3.diff') return new Response(diff);
+        return new Response(JSON.stringify({
+          status: 'ahead', merge_base_commit: { sha: 'base1234' },
+          files: [{ filename: 'docs/文.md', additions: 1, deletions: 1, changes: 2 },
+            ...(missing ? [{ filename: 'docs/missing.md', additions: 1, deletions: 0, changes: 1 }] : [])],
+        }));
+      },
+    });
+    if (missing) await assert.rejects(() => dependencies.getDiff(), /与文件清单不一致/);
+    else assert.equal(await dependencies.getDiff(), diff);
+  }
 });
 
 test('标准 pull_request CI 入口不会被列为风险项', async () => {

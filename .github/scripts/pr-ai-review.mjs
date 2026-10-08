@@ -379,6 +379,38 @@ function buildPrompt({ policy, diff, context, candidateState, architecture }) {
   ].join('\n');
 }
 
+function decodeGitDiffPath(token, prefix) {
+  let path = token;
+  if (token.startsWith('"')) {
+    // Git octal escapes represent UTF-8 bytes, not Unicode code points.
+    const escapes = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, '\\': 92 };
+    const chunks = token.slice(1, -1).split(/(\\(?:[0-3][0-7]{2}|[abtnvfr"\\]))/).map(part => {
+      if (/^\\[0-3][0-7]{2}$/.test(part)) return Buffer.from([parseInt(part.slice(1), 8)]);
+      if (part.length === 2 && part[0] === '\\' && Object.hasOwn(escapes, part[1])) {
+        return Buffer.from([escapes[part[1]]]);
+      }
+      if (part.includes('\\')) throw new ReviewGateError('候选 diff 路径含无效 Git 转义');
+      return Buffer.from(part, 'utf8');
+    });
+    try {
+      path = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks));
+    } catch {
+      throw new ReviewGateError('候选 diff 路径含无效 UTF-8 编码');
+    }
+  }
+  if (!path.startsWith(prefix) || path.length <= prefix.length || path.includes('\0')) {
+    throw new ReviewGateError('候选 diff 路径前缀或文件名无效');
+  }
+  return path.slice(prefix.length);
+}
+
+function destinationPathFromDiffHeader(header) {
+  const match = /^diff --git ("(?:[^"\\]|\\.)*"|a\/[^"\\]+) ("(?:[^"\\]|\\.)*"|b\/[^"\\]+)$/.exec(header.replace(/\r$/, ''));
+  if (!match) throw new ReviewGateError('候选 diff 文件头格式无效，可能被截断');
+  decodeGitDiffPath(match[1], 'a/');
+  return decodeGitDiffPath(match[2], 'b/');
+}
+
 export function assertReviewableDiff(diff, files = []) {
   const text = String(diff);
   const metadataByPath = new Map(
@@ -387,8 +419,7 @@ export function assertReviewableDiff(diff, files = []) {
   );
   const blocks = text.split(/(?=^diff --git )/m).filter(block => block.startsWith('diff --git '));
   for (const block of blocks) {
-    const header = /^diff --git a\/(.+) b\/(.+)$/m.exec(block);
-    const path = header?.[2] ?? '未知文件';
+    const path = destinationPathFromDiffHeader(block.split('\n', 1)[0]);
     const metadata = metadataByPath.get(path);
     if (/^(?:Binary files .* differ|GIT binary patch)$/m.test(block)) {
       throw new ReviewGateError(`候选 diff 包含无法自动审查的二进制内容：${path}`);
@@ -417,8 +448,7 @@ export function assertReviewableDiff(diff, files = []) {
 export function changedFilesFromDiff(diff) {
   const files = new Set();
   for (const line of String(diff).split('\n')) {
-    const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line.trim());
-    if (match) files.add(match[2]);
+    if (line.startsWith('diff --git ')) files.add(destinationPathFromDiffHeader(line));
   }
   return [...files];
 }
